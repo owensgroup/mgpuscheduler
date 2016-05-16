@@ -19,3 +19,14 @@ cd build
 cmake ..
 make
 ```
+
+##How to contribute? (optional)
+- `fork` using GitHub; https://github.com/neoblizz/mgpuscheduler
+- Using command line `cd` into a directory you'd like to work on.
+- `git clone https://github.com/neoblizz/mgpuscheduler.git`
+- `git remote set-url -push origin https://github.com/username/mgpuscheduler.git` This sets the url of the push command to your `username` repository that you forked. That way we can create pull request and make sure nothing accidentally breaks in the main repo. Be sure to change the `username` to your username in the command.
+- Make changes to the file you'd like.
+- `git add filename`
+- `git commit -m "comment here"`
+- `git push` You'll be prompted for username and password for your github.
+- Once you've pushed the changes on your fork, you can create a pull request on Github to merge the changes.
