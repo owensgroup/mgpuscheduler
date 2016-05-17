@@ -13,20 +13,6 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-/**
- * Error checking for CUDA memory allocations.
- */
-#define ERROR_CHECK(ans) { gpuAssert((ans), __FILE__, __LINE__); }
-inline void gpuAssert(cudaError_t code, const char *file,
-                     int line, bool abort=true)
-{
-  if (code != cudaSuccess)
-  {
-     fprintf(stderr,"Cuda error in file '%s' in line '%d': %s\n",
-             file, line, cudaGetErrorString(code));
-     if (abort) exit(code);
-  }
-}
 
 /**
  * @file
@@ -62,7 +48,7 @@ __global__ void MultiplyAddOperator(int n, float * A, float * B, float * C)
 
 void SingleGPUApplication(const int n)
 {
-
+  cudaSetDevice(0);
   printf("** Single GPU Example with n = %d\n", n);
   /* CPU data initializations */
   printf("** CPU Data Initializations -> Started\n");
