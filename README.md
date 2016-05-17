@@ -7,6 +7,7 @@ work for both single and multi-gpu architecture.
 - `scheduler.cu`  - use as main file to schedule the parameters.
 - `singlegpu.cuh` - a simple example of floating point multiply add operation on
 single gpu.
+- `multiplegpus.cuh` - I haven't debugged this, it assumes that we're only using 2 gpus.
 
 ##Compile
 If you add more files, make sure to create the appropriate `CUDA_ADD_EXECUTABLE`
