@@ -28,6 +28,7 @@ void releasehost(float * h_A, float * h_B, float * h_C, float * h_check)
     free(h_B);
     free(h_C);
     free(h_check);
+    printf("** Released CPU Memory Information.\n");
 }
 
 void releasegpu(float * A, float * B, float * C)
@@ -36,6 +37,7 @@ void releasegpu(float * A, float * B, float * C)
   ERROR_CHECK( cudaFree(A));
   ERROR_CHECK( cudaFree(B));
   ERROR_CHECK( cudaFree(C));
+  printf("** Released GPU Memory Information.\n");
 }
 
 __global__ void mgpuMultiplyAddOperator(int n, float * A, float * B, float * C)
@@ -84,7 +86,9 @@ void MultiGPUApplication(const int n)
   /* Memory Allocations */
   printf("** GPUs Data Initializations -> Started\n");
 
-  float *A[2], *B[2], *C[2];
+  float *A[2];
+  float *B[2];
+  float *C[2];
   const int Ns[2] = {n/2, n-(n/2)};
 
   // allocate the memory on the GPUs
@@ -117,11 +121,14 @@ void MultiGPUApplication(const int n)
   for(int dev=0; dev<2; dev++) {
     cudaSetDevice(dev);
     mgpuMultiplyAddOperator<<<grid,blocks>>>(Ns[dev], A[dev], B[dev], C[dev]);
+    printf("** Current GPU Set Device = %d\n", dev);
+    ERROR_CHECK( cudaPeekAtLastError() );
+    ERROR_CHECK( cudaDeviceSynchronize() );
   }
 
   for(int dev=0,pos=0; dev<2; pos+=Ns[dev], dev++) {
       cudaSetDevice(dev);
-      ERROR_CHECK( cudaMemcpyAsync( h_C+pos, C[dev], Ns[dev] * sizeof(float),
+      ERROR_CHECK( cudaMemcpy( h_C+pos, C[dev], Ns[dev] * sizeof(float),
                                     cudaMemcpyDeviceToHost));
   }
   printf("** Kernel Multiply-Add Op -> Finished\n");
