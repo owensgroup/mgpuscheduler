@@ -9,6 +9,8 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
+// namespace sched {
+
 /**
  * Error checking for CUDA memory allocations.
  */
@@ -76,8 +78,12 @@ int main(int argc, char** argv)
     CommandLineArgs * build = new CommandLineArgs;
     input(argc, argv, build);
 
-    if (!(*build).multigpu) SingleGPUApplication((*build).size);
-    else MultiGPUApplication((*build).size);
+    if (!(*build).multigpu) sched::sgpu::SingleGPUApplication((*build).size);
+    else sched::mgpu::MultiGPUApplication((*build).size);
+
+    return 1;
 }
+
+// } // namespace: sched
 
 #endif // SCHEDULER_CU

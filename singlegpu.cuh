@@ -13,6 +13,8 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
+namespace sched {
+namespace sgpu {
 
 /**
  * @file
@@ -20,6 +22,13 @@
  *
  * @brief cuda example file for single GPU workload
  */
+
+ bool isCorrect(const int n, float * answer, float * attempt) {
+   for(int i = 0; i < n; i++) {
+     if (attempt[i] != answer[i]) return false;
+   }
+   return true;
+ }
 
 void release(float * h_A, float * h_B, float * h_C, float * h_check,
              float * A, float * B, float * C)
@@ -115,11 +124,21 @@ void SingleGPUApplication(const int n)
   cudaEventDestroy(start);
   cudaEventDestroy(stop);
 
+  printf("********************************************\n");
   printf("** Elapsed Time (Init + Exec) = %f (ms)\n", elapsedTime);
+
+  bool Validity = isCorrect(n, h_check, h_C);
+  if (Validity) printf("** Solution is valid.\n");
+  else printf("** Solution is valid.\n");
+  printf("********************************************\n");
+
   /* Free Memory Allocations */
   release(h_A, h_B, h_C, h_check, A, B, C);
 
   return;
 }
+
+} // namespace: sgpu
+} // namespace: sched
 
 #endif // SINGLEGPU_CU

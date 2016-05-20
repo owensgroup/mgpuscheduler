@@ -13,6 +13,12 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
+#include <cstdio>
+#include <ctime>
+
+
+namespace sched {
+namespace mgpu {
 
 /**
  * @file
@@ -49,6 +55,13 @@ __global__ void mgpuMultiplyAddOperator(int n, float * A, float * B, float * C)
     }
 }
 
+bool isCorrect(const int n, float * answer, float * attempt) {
+  for(int i = 0; i < n; i++) {
+    if (attempt[i] != answer[i]) return false;
+  }
+  return true;
+}
+
 
 void MultiGPUApplication(const int n)
 {
@@ -74,14 +87,11 @@ void MultiGPUApplication(const int n)
 
   printf("** CPU Data Initializations -> Finished\n");
 
-  /* CUDA event setup */
-  cudaEvent_t start, stop;
-  cudaEventCreate(&start);
-  cudaEventCreate(&stop);
-
-  /* CUDA event start */
+  /* Clock setup */
+  std::clock_t start;
   float elapsedTime;
-  cudaEventRecord(start, 0);
+  start = std::clock();
+
 
   /* Memory Allocations */
   printf("** GPUs Data Initializations -> Started\n");
@@ -112,19 +122,24 @@ void MultiGPUApplication(const int n)
 
   /* Set Kernel Parameters */
   printf("** Kernel Multiply-Add Op -> Started\n");
-  int threadsPerBlock = 1024;
-  int blocksPerGrid = ((n + threadsPerBlock - 1) / threadsPerBlock);
+  const int threadsPerBlock = 1024;
+  const int blocksPerGrid = ((n + threadsPerBlock - 1) / threadsPerBlock);
+  const int bytes = 0;
+
+  const int num_streams = 2;
+  cudaStream_t streams[num_streams];
 
   dim3 blocks  (threadsPerBlock, 1, 1);
   dim3 grid   (blocksPerGrid, 1, 1);
 
   for(int dev=0; dev<2; dev++) {
     cudaSetDevice(dev);
-    mgpuMultiplyAddOperator<<<grid,blocks>>>(Ns[dev], A[dev], B[dev], C[dev]);
+    cudaStreamCreate(&streams[dev]);
+    mgpuMultiplyAddOperator<<<grid, blocks, bytes, streams[dev]>>>(Ns[dev], A[dev], B[dev], C[dev]);
     printf("** Current GPU Set Device = %d\n", dev);
-    ERROR_CHECK( cudaPeekAtLastError() );
-    ERROR_CHECK( cudaDeviceSynchronize() );
   }
+  ERROR_CHECK( cudaPeekAtLastError() );
+  ERROR_CHECK( cudaDeviceSynchronize() );
 
   for(int dev=0,pos=0; dev<2; pos+=Ns[dev], dev++) {
       cudaSetDevice(dev);
@@ -133,15 +148,16 @@ void MultiGPUApplication(const int n)
   }
   printf("** Kernel Multiply-Add Op -> Finished\n");
 
-  cudaEventRecord(stop, 0);
-  cudaEventSynchronize(stop);
-  cudaEventElapsedTime(&elapsedTime, start, stop);
+  elapsedTime = ( std::clock() - start ) / (float) CLOCKS_PER_SEC;
 
-  /* Destroy CUDA event */
-  cudaEventDestroy(start);
-  cudaEventDestroy(stop);
-
+  printf("********************************************\n");
   printf("** Elapsed Time (Init + Exec) = %f (ms)\n", elapsedTime);
+
+  bool Validity = isCorrect(n, h_check, h_C);
+  if (Validity) printf("** Solution is valid.\n");
+  else printf("** Solution is valid.\n");
+  printf("********************************************\n");
+
   /* Free Memory Allocations */
   releasehost(h_A, h_B, h_C, h_check);
 
@@ -150,5 +166,8 @@ void MultiGPUApplication(const int n)
 
   return;
 }
+
+} // namespace: mgpu
+} // namespace: sched
 
 #endif // MGPUS_CU
