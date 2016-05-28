@@ -5,11 +5,10 @@
 
 #include <iostream>
 #include <fstream>
+#include <vector>
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-
-// namespace sched {
 
 /**
  * Error checking for CUDA memory allocations.
@@ -28,58 +27,66 @@ inline void gpuAssert(cudaError_t code, const char *file,
 
 #include "singlegpu.cuh"
 #include "multiplegpus.cuh"
+#include "deviceInfo.cuh"
 
+// =================================================================================================
+// =================================================================================================
 
-struct CommandLineArgs {
-  int size;
-  bool multigpu;
-}; /* Stores command line arguments */
+class CommandLineArgs 
+{
+public:
+  /**
+  * @brief Parses the commandline input and stores in CMD struct
+  * @param[in] argc          Total number of arguments.
+  * @param[in] argv          List of arguments.
+  * @param[out] CMD          Struct that stores the commands
+  */
+	bool ParseCommandLine(int argc, char **argv)
+	{
+    if (argc != 3) 
+    {
+      fprintf(stderr, "Usage: %s meanVectorSize batchSize maxDevices\n", argv[0]);
+      return false;
+    }
 
+    // Set parameters, no error checking currently
+    m_meanVectorSize = atoi(argv[1]);
+    m_batchSize = atoi(argv[2]);
+    m_maxDevices = atoi(argv[3]);
 
-/**
- * @brief prints an error if the usage of commandline is incorrect
- * @param[in] argv          List of arguments.
- */
+    return true;
+	}
 
- void usage(char ** argv) {
-    fprintf(stderr, "Usage: %s n --{sgpu,mgpu}\n", argv[0]);
-    exit(1);
- }
+  int m_meanVectorSize;
+  int m_batchSize;
+  int m_maxDevices;
+};
 
-/**
- * @brief Parses the commandline input and stores in CMD struct
- * @param[in] argc          Total number of arguments.
- * @param[in] argv          List of arguments.
- * @param[out] CMD          Struct that stores the commands
- */
-void input(int argc, char** argv, CommandLineArgs * build) {
-  if (argc != 3) {
-      usage(argv);
-  }
+void GenerateData(int meanVectorSize, int batchSize)
+{
 
-  // Set size n
-  int n = atoi(argv[1]);
-  (*build).size = n;
-
-  // Use multiple GPUs?
-  if (!strcmp(argv[2], "--sgpu")) {
-      (*build).multigpu = false;
-  } else if (!strcmp(argv[2], "--mgpu")) {
-      (*build).multigpu = true;
-  } else {
-    usage(argv);
-  }
-
-  return;
 }
 
 int main(int argc, char** argv)
 {
-    CommandLineArgs * build = new CommandLineArgs;
-    input(argc, argv, build);
+	// Parse command line
+  CommandLineArgs args;
+  if (!args.ParseCommandLine) return -1;
 
-    if (!(*build).multigpu) sched::sgpu::SingleGPUApplication((*build).size);
-    else sched::mgpu::MultiGPUApplication((*build).size);
+	// Get device info
+	int deviceCount(0);
+	ERROR_CHECK(cudaGetDeviceCount(&deviceCount));
+	std::vector< DeviceInfo > devices(deviceCount);
+	for (int deviceNum = 0; deviceNum < deviceCount; ++deviceNum)
+		devices[deviceNum].SetDeviceInfo(deviceNum);
+
+  // Setup the host data
+  GenerateData(args.m_meanVectorSize, args.m_batchSize);
+
+	// Run the experiment
+
+  //if (!(*build).multigpu) sched::sgpu::SingleGPUApplication((*build).size);
+  //else sched::mgpu::MultiGPUApplication((*build).size);
 
     return 1;
 }
