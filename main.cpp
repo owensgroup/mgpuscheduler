@@ -20,7 +20,7 @@ public:
   */
   bool ParseCommandLine(int argc, char **argv)
   {
-    if (argc != 5 && argc != 6)
+    if (argc != 5)
     {
       fprintf(stderr, "Usage: %s meanVectorSize batchSize maxDevices threadsPerBlock\n", argv[0]);
       return false;
@@ -31,8 +31,6 @@ public:
     m_batchSize = atoi(argv[2]);
     m_numDevices = atoi(argv[3]);
     m_threadsPerBlock = atoi(argv[4]);
-    
-    m_numCPUThreads = argc == 6 ? atoi(argv[5]) : -1;
 
     return true;
   }
@@ -41,7 +39,6 @@ public:
   int m_batchSize;
   int m_numDevices;
   int m_threadsPerBlock;
-  int m_numCPUThreads;
 };
 
 int main(int argc, char** argv)
@@ -51,8 +48,7 @@ int main(int argc, char** argv)
   if (!args.ParseCommandLine(argc, argv)) return -1;
 
   // Run the experiment for MultiplyAdd
-  BatchMultiplyAdd batchMultAdd(args.m_meanVectorSize, args.m_batchSize, args.m_numDevices, 
-                                args.m_threadsPerBlock, args.m_numCPUThreads);
+  BatchMultiplyAdd batchMultAdd(args.m_meanVectorSize, args.m_batchSize, args.m_numDevices, args.m_threadsPerBlock);
   batchMultAdd.RunExperiment();
 
   return 0;

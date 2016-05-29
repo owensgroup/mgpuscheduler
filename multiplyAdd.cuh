@@ -61,9 +61,9 @@ public:
 class BatchMultiplyAdd
 {
 public:
-  BatchMultiplyAdd(int meanVectorSize, int batchSize, int numDevices, int threadsPerBlock, int numCPUThreads)
+  BatchMultiplyAdd(int meanVectorSize, int batchSize, int numDevices, int threadsPerBlock)
     : m_meanVectorSize(meanVectorSize), m_batchSize(batchSize), m_numDevices(numDevices), 
-      m_threadsPerBlock(threadsPerBlock), m_numCPUThreads(numCPUThreads)
+      m_threadsPerBlock(threadsPerBlock)
   {}
 
   ~BatchMultiplyAdd()
@@ -73,7 +73,7 @@ public:
   }
 
   void RunExperiment();
-  void RunKernelThreaded(int kernelNum);
+  friend void RunKernelThreaded(BatchMultiplyAdd *batch, int kernelNum);
 
 private:
   void GenerateData();
@@ -81,7 +81,6 @@ private:
   std::vector< MultiplyAdd* > m_data;   // Data for each run of MultiplyAdd
   int m_meanVectorSize, m_batchSize;    // Run-time parameters for the data
   int m_numDevices, m_threadsPerBlock;  // Run-time parameters for the GPU(s)
-  int m_numCPUThreads;                  // Run-time parameters for the CPU theading
 };
 
 #endif // #ifndef BATCH_RUN_H

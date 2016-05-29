@@ -155,9 +155,9 @@ void BatchMultiplyAdd::GenerateData()
   std::cout << "** Done generating data **\n\n";
 }
 
-void BatchMultiplyAdd::RunKernelThreaded(int kernelNum)
+void RunKernelThreaded(BatchMultiplyAdd *batch, int kernelNum)
 {
-  MultiplyAdd &kernel = *m_data[kernelNum];
+  MultiplyAdd &kernel = *(batch->m_data[kernelNum]);
 
   // Acquire a GPU
   int deviceNum = -1;
@@ -198,9 +198,9 @@ void BatchMultiplyAdd::RunKernelThreaded(int kernelNum)
 
   // Run the kernel
   const int bytes(0);
-  dim3 blocks(m_threadsPerBlock, 1, 1);
+  dim3 blocks(batch->m_threadsPerBlock, 1, 1);
   dim3 grid(kernel.m_blocksRequired, 1, 1);
-  GPUMultiplyAdd << <grid, blocks, bytes, kernel.m_stream >> >(kernel.m_vectorSize, kernel.m_dA, kernel.m_dB, kernel.m_dC);
+  GPUMultiplyAdd<<<grid, blocks, bytes, kernel.m_stream>>>(kernel.m_vectorSize, kernel.m_dA, kernel.m_dB, kernel.m_dC);
   ERROR_CHECK(cudaPeekAtLastError());
 
   // Download the output data for this stream, wait for it to copy back before continuing
@@ -234,7 +234,7 @@ void BatchMultiplyAdd::RunExperiment()
   // Call each kernel instance with a std::thread object
   std::thread *threads = new std::thread[m_data.size()];
   for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
-    threads[kernelNum] = std::thread(&BatchMultiplyAdd::RunKernelThreaded, this, kernelNum);
+    threads[kernelNum] = std::thread(RunKernelThreaded, this, kernelNum);
     
   // Wait for all threads to finish
   for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
