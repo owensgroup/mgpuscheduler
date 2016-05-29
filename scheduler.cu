@@ -1,60 +1,54 @@
-#ifndef SCHEDULER_CU
-#define SCHEDULER_CU
+#include "scheduler.cuh"
 
-#include <string.h>
+std::vector< DeviceInfo > Scheduler::m_deviceInfo = std::vector< DeviceInfo >(); // Static member variable initialization
 
-#include <iostream>
-#include <fstream>
-#include <vector>
-
-#include <cuda.h>
-#include <cuda_runtime.h>
-
-#include "batchRun.h"
-
-class CommandLineArgs 
+/**
+* @brief Get relevant device info for a batch run. Generic to whatever kernel we're running batches of.
+*/
+void Scheduler::GetDeviceInfo(int maxNumDevices)
 {
-public:
-  /**
-  * @brief Parses the commandline input and stores in CMD struct
-  * @param[in] argc          Total number of arguments.
-  * @param[in] argv          List of arguments.
-  * @param[out] CMD          Struct that stores the commands
-  */
-  bool ParseCommandLine(int argc, char **argv)
-  {
-    if (argc != 3) 
-    {
-      fprintf(stderr, "Usage: %s meanVectorSize batchSize maxDevices\n", argv[0]);
-      return false;
-    }
+  // Get device info
+  int deviceCount(0);
+  ERROR_CHECK(cudaGetDeviceCount(&deviceCount));
 
-    // Set parameters, no error checking currently
-    m_meanVectorSize = atoi(argv[1]);
-    m_batchSize = atoi(argv[2]);
-    m_numDevices = atoi(argv[3]);
-    m_threadsPerBlock = atoi(argv[4]);
+  int numDevices = deviceCount <= maxNumDevices ? deviceCount : maxNumDevices;
+  m_deviceInfo.resize(numDevices);
 
-    return true;
-  }
-
-  int m_meanVectorSize;
-  int m_batchSize;
-  int m_numDevices;
-  int m_threadsPerBlock;
-};
-
-int main(int argc, char** argv)
-{
-  // Parse command line
-  CommandLineArgs args;
-  if (!args.ParseCommandLine(argc, argv)) return -1;
-
-  // Run the experiment for MultiplyAdd
-  BatchMultiplyAdd batchMultAdd(args.m_meanVectorSize, args.m_batchSize, args.m_numDevices, args.m_threadsPerBlock);
-  batchMultAdd.RunExperiment();
-
-  return 0;
+  for (int deviceNum = 0; deviceNum < numDevices; ++deviceNum)
+    m_deviceInfo[deviceNum].SetDeviceInfo(deviceNum);
 }
 
-#endif // #ifndef SCHEDULER_CU
+void CUDART_CB Scheduler::ReleaseResources(cudaStream_t stream, cudaError_t status, void *object)
+{
+  // Call the method from the kernel class that extends ScheduledKernel
+  ((ScheduledKernel*)object)->ReleaseResources(&m_deviceInfo); 
+}
+
+void CUDART_CB Scheduler::FinishExecution(cudaStream_t stream, cudaError_t status, void *object)
+{
+  // Call the method from the kernel class that extends ScheduledKernel
+  ((ScheduledKernel*)object)->FinishExecution();
+}
+
+/**
+* @brief Find a device with enough resources, and if available, decrement the available resources and return the id.
+*/
+/*
+int Scheduler::GetFreeDevice(const std::size_t &globalMem, const int &blocksDimX)
+{
+  int deviceNum, freeDeviceNum = -1;
+  for (deviceNum = 0; deviceNum < (int)m_deviceInfo.size(); ++deviceNum)
+  {
+    DeviceInfo &device = m_deviceInfo[deviceNum];
+    if (globalMem < device.m_remainingGlobalMem && blocksDimX < device.m_remainingBlocksDimX)
+    {
+      freeDeviceNum = deviceNum;
+      device.m_remainingGlobalMem -= globalMem;
+      device.m_remainingBlocksDimX -= blocksDimX;
+      break;
+    }
+  }
+
+  return freeDeviceNum;
+}
+*/
