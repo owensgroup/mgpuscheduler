@@ -16,29 +16,33 @@ public:
 
   ~MultiplyAdd()
   {
-    FreeMemory();
+    FreeHostMemory();
+    FreeDeviceMemory();
   }
 
-  void FreeMemory()
+  void FreeHostMemory()
   {
     if (m_hA) free(m_hA);
     if (m_hB) free(m_hB);
     if (m_hC) free(m_hC);
     if (m_hCheckC) free(m_hCheckC);
+    m_hA = m_hB = m_hC = m_hCheckC = NULL;
+  }
+
+  void FreeDeviceMemory()
+  {
     if (m_dA) ERROR_CHECK(cudaFree(m_dA));
     if (m_dB) ERROR_CHECK(cudaFree(m_dB));
     if (m_dC) ERROR_CHECK(cudaFree(m_dC));
-
-    m_hA = m_hB = m_hC = m_hCheckC = NULL;
     m_dA = m_dB = m_dC = NULL;
   }
 
   void InitializeData(int vectorSize, int threadsPerBlock, int kernelNum);
   bool VerifyResult();
 
-  virtual int  AcquireResources(std::vector< DeviceInfo > *deviceInfo);
-  virtual void ReleaseResources(std::vector< DeviceInfo > *deviceInfo);
-  virtual void FinishExecution();
+  virtual int  AcquireDeviceResources(std::vector< DeviceInfo > *deviceInfo);
+  virtual void ReleaseDeviceResources(std::vector< DeviceInfo > *deviceInfo);
+  void FinishHostExecution();
 
   int   m_vectorSize;                     // Number of elements per vector
   float *m_hA, *m_hB, *m_hC, *m_hCheckC;  // Host vectors

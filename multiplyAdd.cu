@@ -70,7 +70,7 @@ void MultiplyAdd::InitializeData(int vectorSize, int threadsPerBlock, int kernel
 /**
 * @brief Find a device with enough resources, and if available, decrement the available resources and return the id.
 */
-int MultiplyAdd::AcquireResources(std::vector< DeviceInfo > *deviceInfo)
+int MultiplyAdd::AcquireDeviceResources(std::vector< DeviceInfo > *deviceInfo)
 {
   int deviceNum, freeDeviceNum = -1;
   for (deviceNum = 0; deviceNum < (int)deviceInfo->size(); ++deviceNum)
@@ -91,42 +91,37 @@ int MultiplyAdd::AcquireResources(std::vector< DeviceInfo > *deviceInfo)
 /**
 * @brief Execution is complete, release the GPU resources for other threads.
 */
-void MultiplyAdd::ReleaseResources(std::vector< DeviceInfo > *deviceInfo)
-{
-  // This "omp critical" lock only works if called within an OpenMP loop - so it does NOT work unless we 
-  //   synchronize in RunExperiment(), which creats a max of 8 streams on an 8-core CPU. 
-  // Therefore, we need a different way of locking the deviceInfo to fully utilize each GPU in all scenarios.
-#pragma omp critical 
-  {
-    DeviceInfo &device = deviceInfo->operator[](m_deviceNum);
-    device.m_remainingGlobalMem += m_globalMemRequired;
-    device.m_remainingBlocksDimX += m_blocksRequired;
-  }
-}
-
-/**
-* @brief Execution is complete. Record completion event and timers, verify result, and free memory.
-*/
-void MultiplyAdd::FinishExecution()
+void MultiplyAdd::ReleaseDeviceResources(std::vector< DeviceInfo > *deviceInfo)
 {
   std::cout << "** Kernel " << m_kernelNum << " released GPU " << m_deviceNum << " **\n";
 
-  // Update timers - FAILS - No CUDA RT functions allowed in call-back
+  DeviceInfo &device = deviceInfo->operator[](m_deviceNum);
+  device.m_remainingGlobalMem += m_globalMemRequired;
+  device.m_remainingBlocksDimX += m_blocksRequired;
+
+  // Result is already in host memory, so free GPU memory
+  FreeDeviceMemory();
+}
+
+/**
+* @brief Execution is complete. Record completion event and timers, verify result, and free host memory.
+*/
+void MultiplyAdd::FinishHostExecution()
+{
+  // Update timers
   ERROR_CHECK(cudaEventElapsedTime(&m_queueTimeMillisec, m_startQueueEvent, m_startExecEvent));
   ERROR_CHECK(cudaEventElapsedTime(&m_execTimeMillisec, m_startExecEvent, m_finishExecEvent));
 
-  // Verify the result
+  // Verify the result - In current OpenMP version this is blocking other threads, so increasing Queue time..
   bool correct(true);
   for (int n = 0; n < m_vectorSize; ++n)
     correct = correct && (m_hC[n] == m_hCheckC[n]);
 
-  printf("\tQueue: %.3fms, Execution: %.3fms, Result: %s", m_queueTimeMillisec, m_execTimeMillisec, correct ? "Correct" : "Incorrect");
+  printf("Kernel %d >> Device: %d, Queue: %.3fms, Execution: %.3fms, Correct: %s\n", m_deviceNum, m_kernelNum, m_queueTimeMillisec, m_execTimeMillisec, correct ? "True" : "False");
 
   // Free memory
-  FreeMemory();
+  FreeHostMemory();
 }
-
-
 
 /**
 * @brief Generate data for the entire batch of MultiplyAdd's being run.
@@ -187,8 +182,7 @@ void BatchMultiplyAdd::RunExperiment()
 
 #pragma omp critical // Stalls here and waits for lock, and then locks, executes, unlocks
       {
-        deviceNum = kernel.AcquireResources(&Scheduler::m_deviceInfo);
-        //deviceNum = Scheduler::GetFreeDevice(kernel.m_globalMemRequired, kernel.m_blocksRequired);
+        deviceNum = kernel.AcquireDeviceResources(&Scheduler::m_deviceInfo);
       }
     }
 
@@ -228,14 +222,19 @@ void BatchMultiplyAdd::RunExperiment()
     // Record the time (since stream is non-zero, waits for stream to be complete)
     ERROR_CHECK(cudaEventRecord(kernel.m_finishExecEvent, kernel.m_stream));
 
-    // Release the device resources from the scheduler (using a stream callback function)
-    ERROR_CHECK(cudaStreamAddCallback(kernel.m_stream, Scheduler::ReleaseResources, (void*)&kernel, 0));
-
-    // Also do any other post-execution clean up (in this case just mark finish exec event and update timers)
-    ERROR_CHECK(cudaStreamAddCallback(kernel.m_stream, Scheduler::FinishExecution, (void*)&kernel, 0));
-
-    // First synchronize to make sure this works, maybe, if all threads do the callback before leaving the OpenMP loop
+    // Need to synchronize before releasing resources
     ERROR_CHECK(cudaStreamSynchronize(kernel.m_stream));
+
+    #pragma omp critical // Stalls here and waits for lock, and then locks, executes, unlocks
+    {
+      kernel.ReleaseDeviceResources(&Scheduler::m_deviceInfo);
+    }
+  }
+
+  std::cout << "\n** Kernel Results **\n";
+  for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
+  {
+    m_data[kernelNum]->FinishHostExecution();
   }
 
   ERROR_CHECK(cudaDeviceSynchronize());
