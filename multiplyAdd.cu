@@ -2,6 +2,7 @@
 #include <cuda_runtime.h>
 #include <omp.h>
 #include <iostream>
+#include <thread>
 
 #include "multiplyAdd.cuh"
 #include "scheduler.cuh"
@@ -72,6 +73,9 @@ void MultiplyAdd::InitializeData(int vectorSize, int threadsPerBlock, int kernel
 */
 int MultiplyAdd::AcquireDeviceResources(std::vector< DeviceInfo > *deviceInfo)
 {
+  // Lock this method
+  std::lock_guard< std::mutex > guard(m_deviceInfoMutex); // Automatically unlocks when destroyed
+
   int deviceNum, freeDeviceNum = -1;
   for (deviceNum = 0; deviceNum < (int)deviceInfo->size(); ++deviceNum)
   {
@@ -93,6 +97,9 @@ int MultiplyAdd::AcquireDeviceResources(std::vector< DeviceInfo > *deviceInfo)
 */
 void MultiplyAdd::ReleaseDeviceResources(std::vector< DeviceInfo > *deviceInfo)
 {
+  // Lock this method
+  std::lock_guard< std::mutex > guard(m_deviceInfoMutex); // Automatically unlocks when destroyed
+
   std::cout << "** Kernel " << m_kernelNum << " released GPU " << m_deviceNum << " **\n";
 
   DeviceInfo &device = deviceInfo->operator[](m_deviceNum);
@@ -148,6 +155,70 @@ void BatchMultiplyAdd::GenerateData()
   std::cout << "** Done generating data **\n\n";
 }
 
+void BatchMultiplyAdd::RunKernelThreaded(int kernelNum)
+{
+  MultiplyAdd &kernel = *m_data[kernelNum];
+
+  // Acquire a GPU
+  int deviceNum = -1;
+  bool firstAttempt = true;
+  while (deviceNum < 0)
+  {
+    if (firstAttempt)
+    {
+      std::cout << "** Kernel " << kernelNum << " queued for next available GPU **\n";
+      firstAttempt = false;
+    }
+
+    // Try to acquire GPU resources (using a lock)
+    deviceNum = kernel.AcquireDeviceResources(&Scheduler::m_deviceInfo);
+  }
+
+  std::cout << "** Kernel " << kernelNum << " acquired GPU " << deviceNum << " **\n";
+
+  // Store the device number for updating resources in the stream callback
+  kernel.m_deviceNum = deviceNum;
+
+  // Mark the start execution event
+  ERROR_CHECK(cudaEventRecord(kernel.m_startExecEvent, kernel.m_stream));
+
+  // We've got a GPU, use it
+  // Allocate memory on the GPU for input and output data
+  std::size_t vectorBytes(kernel.m_vectorSize * sizeof(float));
+  ERROR_CHECK(cudaSetDevice(deviceNum));
+  ERROR_CHECK(cudaMalloc((void**)&kernel.m_dA, vectorBytes));
+  ERROR_CHECK(cudaMalloc((void**)&kernel.m_dB, vectorBytes));
+  ERROR_CHECK(cudaMalloc((void**)&kernel.m_dC, vectorBytes));
+
+  // Upload the input data for this stream
+  ERROR_CHECK(cudaMemcpyAsync(kernel.m_dA, kernel.m_hA, kernel.m_vectorSize * sizeof(float),
+    cudaMemcpyHostToDevice, kernel.m_stream));
+  ERROR_CHECK(cudaMemcpyAsync(kernel.m_dB, kernel.m_hB, kernel.m_vectorSize * sizeof(float),
+    cudaMemcpyHostToDevice, kernel.m_stream));
+
+  // Run the kernel
+  const int bytes(0);
+  dim3 blocks(m_threadsPerBlock, 1, 1);
+  dim3 grid(kernel.m_blocksRequired, 1, 1);
+  GPUMultiplyAdd << <grid, blocks, bytes, kernel.m_stream >> >(kernel.m_vectorSize, kernel.m_dA, kernel.m_dB, kernel.m_dC);
+  ERROR_CHECK(cudaPeekAtLastError());
+
+  // Download the output data for this stream, wait for it to copy back before continuing
+  ERROR_CHECK(cudaMemcpyAsync(kernel.m_hC, kernel.m_dC, kernel.m_vectorSize * sizeof(float),
+    cudaMemcpyDeviceToHost, kernel.m_stream));
+
+  // Record the time (since stream is non-zero, waits for stream to be complete)
+  ERROR_CHECK(cudaEventRecord(kernel.m_finishExecEvent, kernel.m_stream));
+
+  // Need to synchronize before releasing resources
+  ERROR_CHECK(cudaStreamSynchronize(kernel.m_stream));
+
+  // Release the resources (using a lock)
+  kernel.ReleaseDeviceResources(&Scheduler::m_deviceInfo);
+
+  // Exiting the function terminates this thread
+}
+
 /**
 * @brief Run the experiment on a large batch of MultiplyAdd kernels, by using separate CUDA streams per run.
 */
@@ -160,77 +231,16 @@ void BatchMultiplyAdd::RunExperiment()
   for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
     ERROR_CHECK(cudaEventRecord(m_data[kernelNum]->m_startQueueEvent, m_data[kernelNum]->m_stream));
 
-  // Use an openMP loop to have multiple CPU threads trying to get an available GPU
-  // Split up the runs of MultiplyAdd over multiple threads
-  int numThreads = m_numCPUThreads == -1 ? omp_get_max_threads() : m_numCPUThreads;
-  if (numThreads > omp_get_max_threads()) numThreads = omp_get_max_threads(); // Probably not necessary, but keep for now
-#pragma omp parallel for schedule(static) num_threads(numThreads) default(none) shared(m_data, m_deviceInfo, m_threadsPerBlock)
+  // Call each kernel instance with a std::thread object
+  std::thread *threads = new std::thread[m_data.size()];
   for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
-  {
-    MultiplyAdd &kernel = *m_data[kernelNum];
+    threads[kernelNum] = std::thread(&BatchMultiplyAdd::RunKernelThreaded, this, kernelNum);
+    
+  // Wait for all threads to finish
+  for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
+    threads[kernelNum].join();
 
-    // Acquire a GPU
-    int deviceNum = -1;
-    bool firstAttempt = true;
-    while (deviceNum < 0)
-    {
-      if (firstAttempt)
-      {
-        std::cout << "** Kernel " << kernelNum << " queued for next available GPU **\n";
-        firstAttempt = false;
-      }
-
-#pragma omp critical // Stalls here and waits for lock, and then locks, executes, unlocks
-      {
-        deviceNum = kernel.AcquireDeviceResources(&Scheduler::m_deviceInfo);
-      }
-    }
-
-    std::cout << "** Kernel " << kernelNum << " acquired GPU " << deviceNum << " **\n";
-
-    // Store the device number for updating resources in the stream callback
-    kernel.m_deviceNum = deviceNum;
-
-    // Mark the start execution event
-    ERROR_CHECK(cudaEventRecord(kernel.m_startExecEvent, kernel.m_stream));
-  
-    // We've got a GPU, use it
-    // Allocate memory on the GPU for input and output data
-    std::size_t vectorBytes(kernel.m_vectorSize * sizeof(float));
-    ERROR_CHECK(cudaSetDevice(deviceNum));
-    ERROR_CHECK(cudaMalloc((void**)&kernel.m_dA, vectorBytes));
-    ERROR_CHECK(cudaMalloc((void**)&kernel.m_dB, vectorBytes));
-    ERROR_CHECK(cudaMalloc((void**)&kernel.m_dC, vectorBytes));
-  
-    // Upload the input data for this stream
-    ERROR_CHECK(cudaMemcpyAsync(kernel.m_dA, kernel.m_hA, kernel.m_vectorSize * sizeof(float),
-                                cudaMemcpyHostToDevice, kernel.m_stream));
-    ERROR_CHECK(cudaMemcpyAsync(kernel.m_dB, kernel.m_hB, kernel.m_vectorSize * sizeof(float),
-                                cudaMemcpyHostToDevice, kernel.m_stream));
-
-    // Run the kernel
-    const int bytes(0);
-    dim3 blocks(m_threadsPerBlock, 1, 1);
-    dim3 grid(kernel.m_blocksRequired, 1, 1);
-    GPUMultiplyAdd<<<grid, blocks, bytes, kernel.m_stream>>>(kernel.m_vectorSize, kernel.m_dA, kernel.m_dB, kernel.m_dC);
-    ERROR_CHECK(cudaPeekAtLastError());
-
-    // Download the output data for this stream, wait for it to copy back before continuing
-    ERROR_CHECK(cudaMemcpyAsync(kernel.m_hC, kernel.m_dC, kernel.m_vectorSize * sizeof(float), 
-                                cudaMemcpyDeviceToHost, kernel.m_stream));
-
-    // Record the time (since stream is non-zero, waits for stream to be complete)
-    ERROR_CHECK(cudaEventRecord(kernel.m_finishExecEvent, kernel.m_stream));
-
-    // Need to synchronize before releasing resources
-    ERROR_CHECK(cudaStreamSynchronize(kernel.m_stream));
-
-    #pragma omp critical // Stalls here and waits for lock, and then locks, executes, unlocks
-    {
-      kernel.ReleaseDeviceResources(&Scheduler::m_deviceInfo);
-    }
-  }
-
+  // Validate and record the results
   std::cout << "\n** Kernel Results **\n";
   for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
   {

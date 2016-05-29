@@ -73,10 +73,11 @@ public:
   }
 
   void RunExperiment();
+  void RunKernelThreaded(int kernelNum);
 
 private:
   void GenerateData();
-
+ 
   std::vector< MultiplyAdd* > m_data;   // Data for each run of MultiplyAdd
   int m_meanVectorSize, m_batchSize;    // Run-time parameters for the data
   int m_numDevices, m_threadsPerBlock;  // Run-time parameters for the GPU(s)
