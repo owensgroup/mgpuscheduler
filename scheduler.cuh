@@ -1,11 +1,23 @@
 #ifndef SCHEDULER_CUH
 #define SCHEDULER_CUH
 
-#include <cuda_runtime.h>
 #include <vector>
 #include <mutex>
 
-#include "deviceInfo.cuh"
+class DeviceInfo
+{
+public:
+  /**
+  * @brief Stores relevant GPU device properties used by this scheduler
+  * @param[in] deviceNum	Device number, less than cudaGetDeviceCount().
+  */
+  void SetDeviceInfo(int deviceNum);
+
+  // Keeping public for now, ease of access
+  std::size_t m_totalGlobalMem, m_remainingGlobalMem; // Global memory
+  int m_totalBlocksDimX, m_remainingBlocksDimX;       // Grid size, number of blocks per grid, dim X of (X,Y,Z)
+  int m_totalCores, m_remainingTotalCores;            // Cores (don't know how to use these, only initialized)
+};
 
 class ScheduledKernel
 {
@@ -19,8 +31,11 @@ public:
 class Scheduler
 {
 public:
-  static void  GetDeviceInfo(int maxNumDevices);
-  static std::vector< DeviceInfo > m_deviceInfo;
+  static void  GetDeviceInfo();
+
+  static std::vector< DeviceInfo > m_deviceInfo;  // Resources available on GPUs
+  static int m_maxDevices, m_maxGPUsPerKernel;    // Run-time parameters for the GPU(s)
+  static bool m_verbose;                                 // Print results (don't want to do while timing)
 };
 
 

@@ -3,6 +3,8 @@
 #include <omp.h>
 #include <iostream>
 #include <thread>
+#include <fstream>
+#include <algorithm>
 
 #include "multiplyAdd.cuh"
 #include "scheduler.cuh"
@@ -34,6 +36,23 @@ __global__ void GPUMultiplyAdd(int n, float * A, float * B, float * C)
   }
 }
 
+void MultiplyAdd::FreeHostMemory()
+{
+  if (m_hA) free(m_hA);
+  if (m_hB) free(m_hB);
+  if (m_hC) free(m_hC);
+  if (m_hCheckC) free(m_hCheckC);
+  m_hA = m_hB = m_hC = m_hCheckC = NULL;
+}
+
+void MultiplyAdd::FreeDeviceMemory()
+{
+  if (m_dA) ERROR_CHECK(cudaFree(m_dA));
+  if (m_dB) ERROR_CHECK(cudaFree(m_dB));
+  if (m_dC) ERROR_CHECK(cudaFree(m_dC));
+  m_dA = m_dB = m_dC = NULL;
+}
+
 /**
 * @brief Initialize host vectors for a single MultiplyAdd run.
 * @param[in] vectorSize	The size of each vector.
@@ -55,6 +74,8 @@ void MultiplyAdd::InitializeData(int vectorSize, int threadsPerBlock, int kernel
   ERROR_CHECK(cudaEventCreate(&m_startQueueEvent));
   ERROR_CHECK(cudaEventCreate(&m_startExecEvent));
   ERROR_CHECK(cudaEventCreate(&m_finishExecEvent));
+  ERROR_CHECK(cudaEventCreate(&m_startCudaMallocEvent));
+  ERROR_CHECK(cudaEventCreate(&m_finishDownloadEvent));
 
   // Fill in A and B with random numbers (should be seeded prior to call)
   float invRandMax = 1000.0f / RAND_MAX; // Produces random numbers between 0 and 1000
@@ -100,7 +121,7 @@ void MultiplyAdd::ReleaseDeviceResources(std::vector< DeviceInfo > *deviceInfo)
   // Lock this method
   std::lock_guard< std::mutex > guard(m_deviceInfoMutex); // Automatically unlocks when destroyed
 
-  std::cout << "** Kernel " << m_kernelNum << " released GPU " << m_deviceNum << " **\n";
+  if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << " released GPU " << m_deviceNum << " **\n";
 
   DeviceInfo &device = deviceInfo->operator[](m_deviceNum);
   device.m_remainingGlobalMem += m_globalMemRequired;
@@ -116,15 +137,17 @@ void MultiplyAdd::ReleaseDeviceResources(std::vector< DeviceInfo > *deviceInfo)
 void MultiplyAdd::FinishHostExecution()
 {
   // Update timers
-  ERROR_CHECK(cudaEventElapsedTime(&m_queueTimeMillisec, m_startQueueEvent, m_startExecEvent));
-  ERROR_CHECK(cudaEventElapsedTime(&m_execTimeMillisec, m_startExecEvent, m_finishExecEvent));
+  ERROR_CHECK(cudaEventElapsedTime(&m_queueTimeMS, m_startQueueEvent, m_startCudaMallocEvent));
+  ERROR_CHECK(cudaEventElapsedTime(&m_kernelExecTimeMS, m_startExecEvent, m_finishExecEvent));
+  ERROR_CHECK(cudaEventElapsedTime(&m_totalExecTimeMS, m_startCudaMallocEvent, m_finishDownloadEvent));
 
   // Verify the result - In current OpenMP version this is blocking other threads, so increasing Queue time..
   bool correct(true);
   for (int n = 0; n < m_vectorSize; ++n)
     correct = correct && (m_hC[n] == m_hCheckC[n]);
 
-  printf("Kernel %d >> Device: %d, Queue: %.3fms, Execution: %.3fms, Correct: %s\n", m_deviceNum, m_kernelNum, m_queueTimeMillisec, m_execTimeMillisec, correct ? "True" : "False");
+  if (Scheduler::m_verbose) printf("Kernel %d >> Device: %d, Queue: %.3fms, Kernel: %.3fms, Total: %.3fms, Correct: %s\n", 
+        m_kernelNum, m_deviceNum, m_queueTimeMS, m_kernelExecTimeMS, m_totalExecTimeMS, correct ? "True" : "False");
 
   // Free memory
   FreeHostMemory();
@@ -144,7 +167,8 @@ void BatchMultiplyAdd::GenerateData()
   std::srand(m_batchSize);
   std::default_random_engine randomGen(m_batchSize);
 
-  std::cout << "** Generating data **\n\tBatch Size: " << m_batchSize << ", Vector Size: " << m_meanVectorSize << ", Threads Per Block: " << m_threadsPerBlock << "\n";
+  if (Scheduler::m_verbose) std::cout << "** Generating data **\n\tBatch Size: " << m_batchSize << ", Vector Size: " 
+            << m_meanVectorSize << ", Threads Per Block: " << m_threadsPerBlock << "\n";
 
   for (int kernelNum = 0; kernelNum < m_batchSize; ++kernelNum)
   {
@@ -152,9 +176,85 @@ void BatchMultiplyAdd::GenerateData()
     m_data[kernelNum]->InitializeData((int)normalDist(randomGen), m_threadsPerBlock, kernelNum);
   }
 
-  std::cout << "** Done generating data **\n\n";
+  if (Scheduler::m_verbose) std::cout << "** Done generating data **\n\n";
 }
 
+void BatchMultiplyAdd::ComputeBatchResults()
+{
+  // Use queue times to find which kernel was run first, and which last.
+  struct MultiplyAddComp
+  {
+    bool operator()(const MultiplyAdd *lhs, const MultiplyAdd *rhs)
+    {
+      return lhs->m_queueTimeMS < rhs->m_queueTimeMS;
+    }
+  };
+
+  std::sort(m_data.begin(), m_data.end(), MultiplyAddComp());
+
+  m_batchKernelExecTimeMS = m_batchTotalExecTimeMS = -1;
+  if (m_data.size() < 2)
+    return;
+
+  const MultiplyAdd &firstKernel = **m_data.begin();
+  const MultiplyAdd &lastKernel = **m_data.rbegin();
+  ERROR_CHECK(cudaEventElapsedTime(&m_batchKernelExecTimeMS, firstKernel.m_startExecEvent, lastKernel.m_finishExecEvent));
+  ERROR_CHECK(cudaEventElapsedTime(&m_batchTotalExecTimeMS, firstKernel.m_startCudaMallocEvent, lastKernel.m_finishDownloadEvent));
+}
+
+void BatchMultiplyAdd::OutputResultsCSV(const std::string &kernelName)
+{
+  // First output data for each kernel
+  std::string filenameKernel = kernelName + std::string("KernelResults.csv");
+
+  // Append in case running from a script (without, file is overwritten)
+  std::ofstream csvKernelFile;
+  csvKernelFile.open(filenameKernel.c_str(), std::ios::app);
+
+  // Only output header if file is empty
+  csvKernelFile.seekp(0, std::ios_base::beg);
+  std::size_t posFirst = csvKernelFile.tellp();
+  csvKernelFile.seekp(0, std::ios_base::end);
+  std::size_t posLast = csvKernelFile.tellp();
+  if (posLast-posFirst == 0)
+  {
+    csvKernelFile << "BatchSize, KernelName, MeanVectorSize, ThreadsPerBlock, MaxDevices";
+    csvKernelFile << ", MaxGPUsPerKernel, KernelNum, QueueTimeMS, KernelExecTimeMS, TotalExecTimeMS\n";
+  }
+
+  for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
+  {
+    const MultiplyAdd &kernel = *m_data[kernelNum];
+    csvKernelFile << m_batchSize << ", " << kernelName.c_str() << ", " << m_meanVectorSize << ", " << m_threadsPerBlock;
+    csvKernelFile << ", " << Scheduler::m_maxDevices << ", " << Scheduler::m_maxGPUsPerKernel << ", " << kernel.m_kernelNum;
+    csvKernelFile << ", " << kernel.m_queueTimeMS << ", " << kernel.m_kernelExecTimeMS;
+    csvKernelFile << ", " << kernel.m_totalExecTimeMS << "\n";
+  }
+
+  // Second output data summary for this batch run
+  std::string filenameBatch = kernelName + std::string("BatchResults.csv");
+  
+  // Append in case running from a script (without, file is overwritten)
+  std::ofstream csvBatchFile;
+  csvBatchFile.open(filenameBatch.c_str(), std::ios::app);
+
+  // Only output header if file is empty
+  csvBatchFile.seekp(0, std::ios_base::beg);
+  posFirst = csvBatchFile.tellp();
+  csvBatchFile.seekp(0, std::ios_base::end);
+  posLast = csvBatchFile.tellp();
+  if (posLast - posFirst == 0)
+  {
+    csvBatchFile << "BatchSize, KernelName, MeanVectorSize, ThreadsPerBlock, MaxDevices";
+    csvBatchFile << ", MaxGPUsPerKernel, BatchKernelExecTimeMS, BatchTotalExecTimeMS\n";
+  }
+
+  csvBatchFile << m_batchSize << ", " << kernelName.c_str() << ", " << m_meanVectorSize << ", " << m_threadsPerBlock;
+  csvBatchFile << ", " << Scheduler::m_maxDevices << ", " << Scheduler::m_maxGPUsPerKernel;
+  csvBatchFile << ", " << m_batchKernelExecTimeMS << ", " << m_batchTotalExecTimeMS << "\n";
+}
+
+// NVCC having trouble parsing the std::thread() call when this is a member function, so keeping it non-member friend
 void RunKernelThreaded(BatchMultiplyAdd *batch, int kernelNum)
 {
   MultiplyAdd &kernel = *(batch->m_data[kernelNum]);
@@ -166,7 +266,7 @@ void RunKernelThreaded(BatchMultiplyAdd *batch, int kernelNum)
   {
     if (firstAttempt)
     {
-      std::cout << "** Kernel " << kernelNum << " queued for next available GPU **\n";
+      if (Scheduler::m_verbose) std::cout << "** Kernel " << kernelNum << " queued for next available GPU **\n";
       firstAttempt = false;
     }
 
@@ -174,13 +274,13 @@ void RunKernelThreaded(BatchMultiplyAdd *batch, int kernelNum)
     deviceNum = kernel.AcquireDeviceResources(&Scheduler::m_deviceInfo);
   }
 
-  std::cout << "** Kernel " << kernelNum << " acquired GPU " << deviceNum << " **\n";
+  if (Scheduler::m_verbose) std::cout << "** Kernel " << kernelNum << " acquired GPU " << deviceNum << " **\n";
 
-  // Store the device number for updating resources in the stream callback
+  // Store the device number for use in ReleaseDeviceResources() - not strictly necessary, could be passed in
   kernel.m_deviceNum = deviceNum;
 
-  // Mark the start execution event
-  ERROR_CHECK(cudaEventRecord(kernel.m_startExecEvent, kernel.m_stream));
+  // Mark the start total execution event
+  ERROR_CHECK(cudaEventRecord(kernel.m_startCudaMallocEvent, kernel.m_stream));
 
   // We've got a GPU, use it
   // Allocate memory on the GPU for input and output data
@@ -196,6 +296,9 @@ void RunKernelThreaded(BatchMultiplyAdd *batch, int kernelNum)
   ERROR_CHECK(cudaMemcpyAsync(kernel.m_dB, kernel.m_hB, kernel.m_vectorSize * sizeof(float),
     cudaMemcpyHostToDevice, kernel.m_stream));
 
+  // Mark the start kernel execution event
+  ERROR_CHECK(cudaEventRecord(kernel.m_startExecEvent, kernel.m_stream));
+
   // Run the kernel
   const int bytes(0);
   dim3 blocks(batch->m_threadsPerBlock, 1, 1);
@@ -203,12 +306,15 @@ void RunKernelThreaded(BatchMultiplyAdd *batch, int kernelNum)
   GPUMultiplyAdd<<<grid, blocks, bytes, kernel.m_stream>>>(kernel.m_vectorSize, kernel.m_dA, kernel.m_dB, kernel.m_dC);
   ERROR_CHECK(cudaPeekAtLastError());
 
-  // Download the output data for this stream, wait for it to copy back before continuing
+  // Record the time (since stream is non-zero, waits for stream to be complete)
+  ERROR_CHECK(cudaEventRecord(kernel.m_finishExecEvent, kernel.m_stream));
+
+  // Download the output data for this stream
   ERROR_CHECK(cudaMemcpyAsync(kernel.m_hC, kernel.m_dC, kernel.m_vectorSize * sizeof(float),
     cudaMemcpyDeviceToHost, kernel.m_stream));
 
-  // Record the time (since stream is non-zero, waits for stream to be complete)
-  ERROR_CHECK(cudaEventRecord(kernel.m_finishExecEvent, kernel.m_stream));
+  // Mark the end of total execution event
+  ERROR_CHECK(cudaEventRecord(kernel.m_finishDownloadEvent, kernel.m_stream));
 
   // Need to synchronize before releasing resources
   ERROR_CHECK(cudaStreamSynchronize(kernel.m_stream));
@@ -222,9 +328,9 @@ void RunKernelThreaded(BatchMultiplyAdd *batch, int kernelNum)
 /**
 * @brief Run the experiment on a large batch of MultiplyAdd kernels, by using separate CUDA streams per run.
 */
-void BatchMultiplyAdd::RunExperiment()
+void BatchMultiplyAdd::RunExperiment(const std::string &kernelName)
 {
-  Scheduler::GetDeviceInfo(m_numDevices);
+  Scheduler::GetDeviceInfo();
   GenerateData();
 
   // Mark start queue events (needs to be done here, b/c CPU threads will block eachother)
@@ -240,12 +346,18 @@ void BatchMultiplyAdd::RunExperiment()
   for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
     threads[kernelNum].join();
 
-  // Validate and record the results
-  std::cout << "\n** Kernel Results **\n";
+  // Validate and print results
+  if (Scheduler::m_verbose) std::cout << "\n** Kernel Results **\n";
   for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
   {
     m_data[kernelNum]->FinishHostExecution();
   }
+
+  // Compute accumulated batch results
+  ComputeBatchResults();
+
+  // Record results to CSV
+  OutputResultsCSV(kernelName);
 
   ERROR_CHECK(cudaDeviceSynchronize());
 }
