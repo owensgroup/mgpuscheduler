@@ -8,4 +8,6 @@ list(APPEND CMAKE_CXX_FLAGS -std=c++11)
 
 CUDA_ADD_EXECUTABLE(sched main.cpp scheduler.cu scheduler.cuh multiplyAdd.cu multiplyAdd.cuh deviceInfo.cuh)
 
-TARGET_LINK_LIBRARIES(sched pthread)
+IF (UNIX)
+    TARGET_LINK_LIBRARIES(sched pthread)
+ENDIF (UNIX)
