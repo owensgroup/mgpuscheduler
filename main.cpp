@@ -8,6 +8,7 @@
 #include <cuda_runtime.h>
 
 #include "multiplyAdd.cuh"
+// #include "matrixmultiply.cuh"
 #include "scheduler.cuh"
 
 class CommandLineArgs
@@ -60,6 +61,10 @@ int main(int argc, char** argv)
   // Run the experiment for MultiplyAdd
   BatchMultiplyAdd batchMultAdd(args.m_meanVectorSize, args.m_batchSize, args.m_threadsPerBlock);
   batchMultAdd.RunExperiment(std::string("MultiplyAdd"));
+
+  // Run the experiment for MatrixMultiply
+  // BatchMatrixMultiply batchMtxMulti(args.m_meanVectorSize, args.m_batchSize, args.m_threadsPerBlock);
+  // batchMtxMulti.RunExperiment(std::string("MatrixMultiply"));
 
   return 0;
 }
