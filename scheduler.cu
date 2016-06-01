@@ -28,11 +28,13 @@ inline void gpuAssert(cudaError_t code, const char *file,
 
 #include "singlegpu.cuh"
 #include "multiplegpus.cuh"
+#include "mtx.cuh"
 
 
 struct CommandLineArgs {
   int size;
   bool multigpu;
+  bool algo;
 }; /* Stores command line arguments */
 
 
@@ -42,7 +44,7 @@ struct CommandLineArgs {
  */
 
  void usage(char ** argv) {
-    fprintf(stderr, "Usage: %s n --{sgpu,mgpu}\n", argv[0]);
+    fprintf(stderr, "Usage: %s n --{sgpu,mgpu} --{madd,mtx}\n", argv[0]);
     exit(1);
  }
 
@@ -53,7 +55,7 @@ struct CommandLineArgs {
  * @param[out] CMD          Struct that stores the commands
  */
 void input(int argc, char** argv, CommandLineArgs * build) {
-  if (argc != 3) {
+  if (argc != 4) {
       usage(argv);
   }
 
@@ -70,6 +72,14 @@ void input(int argc, char** argv, CommandLineArgs * build) {
     usage(argv);
   }
 
+  if (!strcmp(argv[3], "--madd")) {
+      (*build).algo = false;
+  } else if (!strcmp(argv[3], "--mtx")) {
+      (*build).algo = true;
+  } else {
+    usage(argv);
+  }
+
   return;
 }
 
@@ -78,8 +88,10 @@ int main(int argc, char** argv)
     CommandLineArgs * build = new CommandLineArgs;
     input(argc, argv, build);
 
-    if (!(*build).multigpu) sched::sgpu::SingleGPUApplication((*build).size);
-    else sched::mgpu::MultiGPUApplication((*build).size);
+    if (!(*build).multigpu) {
+      if (!(*build).algo) sched::sgpu::SingleGPUApplication((*build).size);
+      else sched::mtx::MTXMultiplyApplication((*build).size);
+    } else sched::mgpu::MultiGPUApplication((*build).size);
 
     return 1;
 }
