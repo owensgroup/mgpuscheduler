@@ -1,5 +1,5 @@
-#ifndef BATCH_RUN_H
-#define BATCH_RUN_H
+#ifndef BATCH_MTX_H
+#define BATCH_MTX_H
 
 #include <cstdlib>
 #include <random>
@@ -72,4 +72,4 @@ private:
   float m_batchTotalExecTimeMS;   // Time from first kernel data cudaMalloc to last kernel data downloaded
 };
 
-#endif // #ifndef BATCH_RUN_H
+#endif // #ifndef BATCH_MTX_H
