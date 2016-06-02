@@ -32,7 +32,8 @@ public:
   virtual void ReleaseDeviceResources(std::vector< DeviceInfo > *deviceInfo);
 
   int   m_vectorSize;                     // Number of elements per vector
-  float **m_hA, **m_hB, **m_hC, **m_hCheckC;  // Host vectors
+  // float **m_hA, **m_hB, **m_hC, **m_hCheckC;  // Host vectors (2d pointers)
+  float *m_hA, *m_hB, *m_hC, *m_hCheckC;  // Host vectors (1d pointers)
   float *m_dA, *m_dB, *m_dC;              // Device vectors
 
   unsigned long long  m_globalMemRequired;  // The amount of global device memory required
