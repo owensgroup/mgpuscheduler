@@ -20,9 +20,11 @@ public:
     FreeDeviceMemory();
   }
 
+
   void FreeHostMemory();
   void FreeDeviceMemory();
 
+  float ** CreateMatrix(int m, int n);
   void InitializeData(int vectorSize, int threadsPerBlock, int kernelNum);
   void FinishHostExecution();
 

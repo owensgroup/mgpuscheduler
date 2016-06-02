@@ -9,7 +9,7 @@
 #include "matrixmultiply.cuh"
 #include "scheduler.cuh"
 
-#define BLOCK_WIDTH 2
+#define BLOCK_WIDTH 8
 
 /**
 * @brief Macro for error checking for all GPU calls
@@ -29,37 +29,49 @@ inline void gpuAssert(cudaError_t code, const char *file,
 }
 #endif
 
-#define BLOCK_WIDTH 2
-
 __global__ void GPUMatrixMultiply(const int WIDTH, float * A, float * B, float * C)
 {
-    __shared__ float sh_A [BLOCK_WIDTH][BLOCK_WIDTH];
-    __shared__ float sh_B [BLOCK_WIDTH][BLOCK_WIDTH];
+    // __shared__ float sh_A [BLOCK_WIDTH][BLOCK_WIDTH];
+    // __shared__ float sh_B [BLOCK_WIDTH][BLOCK_WIDTH];
+    //
+    // unsigned int col = BLOCK_WIDTH * blockIdx.x + threadIdx.x;
+    // unsigned int row = BLOCK_WIDTH * blockIdx.y + threadIdx.y;
+    //
+    // #pragma unroll
+    // for (int m = 0; m < WIDTH/BLOCK_WIDTH; m++)
+    // {
+    //     sh_A[threadIdx.y][threadIdx.x] = A[row*WIDTH + (m*BLOCK_WIDTH + threadIdx.x)];
+    //     sh_B[threadIdx.y][threadIdx.x] = B[(m*BLOCK_WIDTH + threadIdx.y) * WIDTH + col];
+    //  __syncthreads();
+    //
+    //   for (int k = 0; k < BLOCK_WIDTH; k++) {
+    //     C[row*WIDTH + col]+= sh_A[threadIdx.x][k] * sh_B[k][threadIdx.y];
+    //   }
+    //  __syncthreads();
+    // }
 
-    unsigned int col = WIDTH*blockIdx.x + threadIdx.x;
-    unsigned int row = WIDTH*blockIdx.y + threadIdx.y;
+    int col = blockDim.x*blockIdx.x + threadIdx.x;
+    int row = blockDim.y*blockIdx.y + threadIdx.y;
 
-    #pragma unroll
-    for (int m = 0; m < WIDTH/BLOCK_WIDTH; m++)
-    {
-        sh_A[threadIdx.y][threadIdx.x] = A[row*WIDTH + (m*BLOCK_WIDTH + threadIdx.x)];
-        sh_B[threadIdx.y][threadIdx.x] = B[(m*BLOCK_WIDTH + threadIdx.y) * WIDTH + col];
-     __syncthreads();
-
-      for (int k = 0; k < BLOCK_WIDTH; k++) {
-        C[row*WIDTH + col]+= sh_A[threadIdx.x][k] * sh_B[k][threadIdx.y];
-      }
-     __syncthreads();
+    if((col < WIDTH) && (row < WIDTH)) {
+        C[col*WIDTH + row] = A[col*WIDTH + row] + B[col*WIDTH + row];
     }
+}
+
+__global__ void MemSetKernel(const int n, float * C) {
+  unsigned int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index < n) C[index] = 0.0f;
 }
 
 
 void MatrixMultiply::FreeHostMemory()
 {
-  if (m_hA) free(m_hA);
-  if (m_hB) free(m_hB);
-  if (m_hC) free(m_hC);
-  if (m_hCheckC) free(m_hCheckC);
+  for (int i = 0; i < m_vectorSize; i++) {
+    if (m_hA[i]) free(m_hA[i]);
+    if (m_hB[i]) free(m_hB[i]);
+    if (m_hC[i]) free(m_hC[i]);
+    if (m_hCheckC[i]) free(m_hCheckC[i]);
+  }
   m_hA = m_hB = m_hC = m_hCheckC = NULL;
 }
 
@@ -71,6 +83,18 @@ void MatrixMultiply::FreeDeviceMemory()
   m_dA = m_dB = m_dC = NULL;
 }
 
+float ** MatrixMultiply::CreateMatrix(int m, int n)
+{
+    int i;
+    float ** Matrix;
+    Matrix = (float **) malloc((size_t)(m * sizeof(float*)));
+    Matrix[0] = (float *) malloc((size_t)((m*n) * sizeof(float)));
+    for (i=1; i<=m; i++) {
+        Matrix[i] = Matrix[i-1] + n;
+    }
+    return Matrix;
+}
+
 /**
 * @brief Initialize host vectors for a single MatrixMultiply run.
 * @param[in] vectorSize	The size of each vector.
@@ -80,28 +104,14 @@ void MatrixMultiply::InitializeData(int vectorSize, int threadsPerBlock, int ker
   m_vectorSize = vectorSize;
   m_kernelNum = kernelNum;
 
-  /*
-  char **a;
-  a=(char **) malloc(10*sizeof(char *));
-  for(i=0;i<10;i++)
-      a[i]=(char *) malloc(20*sizeof(char));
-  */
-
   // Malloc n * n memory on host to store the matrix
-  m_hA = (float**)malloc(sizeof(float) * vectorSize);
-  m_hB = (float**)malloc(sizeof(float) * vectorSize);
-  m_hC = (float**)malloc(sizeof(float) * vectorSize);
-  m_hCheckC = (float**)malloc(sizeof(float) * vectorSize);
-
-  for(int i = 0; i < vectorSize; i++) {
-    m_hA[i]= (float*) malloc(vectorSize * sizeof(float));
-    m_hB[i]= (float*) malloc(vectorSize * sizeof(float));
-    m_hC[i]= (float*) malloc(vectorSize * sizeof(float));
-    m_hCheckC[i]= (float*) malloc(vectorSize * sizeof(float));
-  }
+  m_hA =      CreateMatrix(vectorSize, vectorSize);
+  m_hB =      CreateMatrix(vectorSize, vectorSize);
+  m_hC =      CreateMatrix(vectorSize, vectorSize);
+  m_hCheckC = CreateMatrix(vectorSize, vectorSize);
 
   m_blocksRequired = vectorSize % threadsPerBlock == 0 ? (vectorSize / threadsPerBlock) : 1 + (vectorSize / threadsPerBlock);
-  m_globalMemRequired = 3 * sizeof(float) * vectorSize;
+  m_globalMemRequired = 3 * sizeof(float) * vectorSize * vectorSize;
 
   ERROR_CHECK(cudaStreamCreate(&m_stream));
   ERROR_CHECK(cudaEventCreate(&m_startQueueEvent));
@@ -339,29 +349,35 @@ void RunKernelThreaded(BatchMatrixMultiply *batch, int kernelNum)
   ERROR_CHECK(cudaMalloc((void**)&kernel.m_dC, vectorBytes));
 
   // Upload the input data for this stream
-  ERROR_CHECK(cudaMemcpyAsync(kernel.m_dA, kernel.m_hA, kernel.m_vectorSize * kernel.m_vectorSize * sizeof(float),
+  ERROR_CHECK(cudaMemcpyAsync(kernel.m_dA, kernel.m_hA[0], vectorBytes,
     cudaMemcpyHostToDevice, kernel.m_stream));
-  ERROR_CHECK(cudaMemcpyAsync(kernel.m_dB, kernel.m_hB, kernel.m_vectorSize * kernel.m_vectorSize * sizeof(float),
+  ERROR_CHECK(cudaMemcpyAsync(kernel.m_dB, kernel.m_hB[0], vectorBytes,
     cudaMemcpyHostToDevice, kernel.m_stream));
 
   // Mark the start kernel execution event
   ERROR_CHECK(cudaEventRecord(kernel.m_startExecEvent, kernel.m_stream));
 
-  // Run the kernel
-  const int bytes(0);
-  dim3 blocks (BLOCK_WIDTH, BLOCK_WIDTH, 1);
-  dim3 grid (kernel.m_vectorSize/BLOCK_WIDTH, kernel.m_vectorSize/BLOCK_WIDTH, 1);
+  // Initialize C to 0
+  dim3 blocks(batch->m_threadsPerBlock, 1, 1);
+  dim3 grid(kernel.m_blocksRequired, 1, 1);
+  MemSetKernel<<<grid, blocks>>>(kernel.m_vectorSize, kernel.m_dC);
+  ERROR_CHECK(cudaPeekAtLastError());
+  // printf("MemSetKernel Executed, all C init to 0.0f\n");
 
-  // dim3 blocks(batch->m_threadsPerBlock, 1, 1);
-  // dim3 grid(kernel.m_blocksRequired, 1, 1);
-  GPUMatrixMultiply<<<grid, blocks, bytes, kernel.m_stream>>>(kernel.m_vectorSize, kernel.m_dA, kernel.m_dB, kernel.m_dC);
+  // Run the kernel
+  const int bytes(0); // = BLOCK_WIDTH*BLOCK_WIDTH;
+  dim3 dimBlocks (batch->m_threadsPerBlock, batch->m_threadsPerBlock, 1);
+  dim3 dimGrid ((kernel.m_vectorSize+dimBlocks.x-1)/dimBlocks.x,
+                (kernel.m_vectorSize+dimBlocks.x-1)/dimBlocks.x, 1);
+  GPUMatrixMultiply<<<dimGrid, dimBlocks, bytes, kernel.m_stream>>>(kernel.m_vectorSize, kernel.m_dA, kernel.m_dB, kernel.m_dC);
   ERROR_CHECK(cudaPeekAtLastError());
 
   // Record the time (since stream is non-zero, waits for stream to be complete)
   ERROR_CHECK(cudaEventRecord(kernel.m_finishExecEvent, kernel.m_stream));
 
+
   // Download the output data for this stream
-  ERROR_CHECK(cudaMemcpyAsync(kernel.m_hC, kernel.m_dC, kernel.m_vectorSize * kernel.m_vectorSize * sizeof(float),
+  ERROR_CHECK(cudaMemcpyAsync(kernel.m_hC[0], kernel.m_dC, vectorBytes,
     cudaMemcpyDeviceToHost, kernel.m_stream));
 
   // Mark the end of total execution event
