@@ -116,7 +116,6 @@ void MatrixMultiply::InitializeData(int matrixSize, int blockWidth, int kernelNu
   ERROR_CHECK(cudaHostAlloc(&m_hA, sizeof(float) * matrixSize * matrixSize, cudaHostAllocPortable));
   ERROR_CHECK(cudaHostAlloc(&m_hB, sizeof(float) * matrixSize * matrixSize, cudaHostAllocPortable));
   ERROR_CHECK(cudaHostAlloc(&m_hC, sizeof(float) * matrixSize * matrixSize, cudaHostAllocPortable));
-
   m_hCheckC = (float*) malloc(sizeof(float) * matrixSize * matrixSize);
 
   m_blocksRequired = matrixSize % blockWidth == 0 ? (matrixSize / blockWidth) : 1 + (matrixSize / blockWidth);
@@ -158,7 +157,7 @@ void MatrixMultiply::InitializeData(int matrixSize, int blockWidth, int kernelNu
     //m_hB[i] = std::rand() * invRandMax;
     m_hCheckC[i] = 0.0f;
   }
-
+/*
   if (Scheduler::m_verbose)
   {
     for (int x = 0; x < matrixSize; x++) { // row number of output
@@ -169,6 +168,7 @@ void MatrixMultiply::InitializeData(int matrixSize, int blockWidth, int kernelNu
       }
     }
   }
+  return;*/
 }
 
 /**
