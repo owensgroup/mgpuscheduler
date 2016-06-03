@@ -400,11 +400,13 @@ void RunKernelThreaded(BatchMatrixMultiply *batch, int kernelNum)
 
   // Initialize C to 0
   //dim3 blocks(batch->m_threadsPerBlock, 1, 1); // Previous
-  dim3 blocks(kernel.m_blockWidth, kernel.m_blockWidth, 1); // TODO MUHAMMAD: Update the kernel for this new indexing, or do it another way
-  dim3 grid(kernel.m_blocksRequired, kernel.m_blocksRequired, 1);
-  MemSetKernel <<<grid, blocks >>>(kernel.m_matrixSize, kernel.m_dC);
-  ERROR_CHECK(cudaPeekAtLastError());
-  // printf("MemSetKernel Executed, all C init to 0.0f\n");
+  /*	
+	// MemSetKernel Utility (optional) 
+  	dim3 blocks(kernel.m_blockWidth, 1, 1); 
+  	dim3 grid(kernel.m_blocksRequired, 1, 1);
+  	MemSetKernel <<<grid, blocks >>>(kernel.m_matrixSize, kernel.m_dC);
+  	ERROR_CHECK(cudaPeekAtLastError());
+  */
 
   // Run the kernel
   const int bytes(0); // TODO MUHAMMAD: Needs to be updated now
