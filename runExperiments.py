@@ -45,12 +45,12 @@ def main(argv):
                print('\t... Done, {0}s'.format(endCall-startCall))
 
                # Second, run MatrixMultiply
-               matrixSize = matrixSizeList[inputIndex]
-               print('Input: {0}, Batch: {1}, Threads: {2}, GPUs: {3}...'.format(matrixSize, batchSize, threadsPerBlock, maxDevices))
-               startCall = timer() 
-               subprocess.call([args.executable, str(matrixSize), str(batchSize), str(maxDevices), str(threadsPerBlock), str(maxGPUsPerKernel), 'MatrixMultiply', str(verboseFlag)]) 
-               endCall = timer()
-               print('\t... Done, {0}s'.format(endCall-startCall))
+               #matrixSize = matrixSizeList[inputIndex]
+               #print('Input: {0}, Batch: {1}, Threads: {2}, GPUs: {3}...'.format(matrixSize, batchSize, threadsPerBlock, maxDevices))
+               #startCall = timer() 
+               #subprocess.call([args.executable, str(matrixSize), str(batchSize), str(maxDevices), str(threadsPerBlock), str(maxGPUsPerKernel), 'MatrixMultiply', str(verboseFlag)]) 
+               #endCall = timer()
+               #print('\t... Done, {0}s'.format(endCall-startCall))
 
          endBatchSize = timer()
          print('------------------------------------------------')

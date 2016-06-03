@@ -92,42 +92,22 @@ void MatrixMultiply::FreeDeviceMemory()
   m_dA = m_dB = m_dC = NULL;
 }
 
-float ** MatrixMultiply::CreateMatrix(int m, int n)
-{
-    int i;
-    float ** Matrix;
-    Matrix = (float **) malloc((size_t)(m * sizeof(float*)));
-    Matrix[0] = (float *) malloc((size_t)((m*n) * sizeof(float)));
-    for (i=1; i<=m; i++) {
-        Matrix[i] = Matrix[i-1] + n;
-    }
-    return Matrix;
-}
-
 /**
 * @brief Initialize host vectors for a single MatrixMultiply run.
 * @param[in] vectorSize	The size of each vector.
 */
-void MatrixMultiply::InitializeData(int matrixSize, int blockWidth, int threadsPerBlock, int kernelNum)
+void MatrixMultiply::InitializeData(int matrixSize, int blockWidth, int kernelNum)
 {
   m_matrixSize = matrixSize;
   m_blockWidth = blockWidth;
   m_kernelNum = kernelNum;
-
-  // Malloc n * n memory on host to store the matrix
-  /*m_hA =      CreateMatrix(matrixSize, matrixSize);
-  m_hB =      CreateMatrix(matrixSize, matrixSize);
-  m_hC =      CreateMatrix(matrixSize, matrixSize);
-  m_hCheckC = CreateMatrix(matrixSize, matrixSize);*/
 
   m_hA = (float*) malloc(sizeof(float) * matrixSize * matrixSize);
   m_hB = (float*) malloc(sizeof(float) * matrixSize * matrixSize);
   m_hC = (float*) malloc(sizeof(float) * matrixSize * matrixSize);
   m_hCheckC = (float*) malloc(sizeof(float) * matrixSize * matrixSize);
 
-  m_blocksRequired = matrixSize % blockWidth == 0 ? (matrixSize / blockWidth) : 1 + (matrixSize / blockWidth); // Now used for both (should be same as prev. for MatrixMultiply?)
-  // dim3 dimGrid((kernel.m_matrixSize - 1) / BLOCK_WIDTH + 1, (kernel.m_matrixSize - 1) / BLOCK_WIDTH + 1, 1); // Used prev. for MatrixMultiply
-  // m_blocksRequired = matrixSize % threadsPerBlock == 0 ? (matrixSize / threadsPerBlock) : 1 + (matrixSize / threadsPerBlock); // Used prev. for MemSet
+  m_blocksRequired = matrixSize % blockWidth == 0 ? (matrixSize / blockWidth) : 1 + (matrixSize / blockWidth); 
   m_globalMemRequired = 3 * sizeof(float) * matrixSize * matrixSize;
 
   m_floatingPointOps = -1;  // TODO COLLIN: Calculate this
@@ -139,26 +119,6 @@ void MatrixMultiply::InitializeData(int matrixSize, int blockWidth, int threadsP
   ERROR_CHECK(cudaEventCreate(&m_finishExecEvent));
   ERROR_CHECK(cudaEventCreate(&m_startCudaMallocEvent));
   ERROR_CHECK(cudaEventCreate(&m_finishDownloadEvent));
-
-  // Fill in A and B with random numbers (should be seeded prior to call)
-  /* 2D Array assignment and calc.
-  for (int n = 0; n < matrixSize; ++n)
-  {
-    for (int m = 0; m < matrixSize; m++) {
-      m_hA[n][m] = std::rand() * invRandMax;
-      m_hB[n][m] = std::rand() * invRandMax;
-
-      m_hCheckC[n][m] = 0.0f; // Init to 0
-    }
-  }
-
-  for (int x = 0; x < matrixSize; x++) {
-    for (int y = 0; y < matrixSize; y++) {
-      for (int z = 0; z < matrixSize; z++) {
-          m_hCheckC[x][y] += m_hA[x][z] * m_hB[z][y];
-      }
-    }
-  }*/
 
   // float invRandMax = 1000.0f / RAND_MAX; // Produces random numbers between 0 and 1000
   for (int i = 0; i < matrixSize*matrixSize; i++) {
@@ -267,12 +227,12 @@ void BatchMatrixMultiply::GenerateData()
   std::default_random_engine randomGen(m_batchSize);
 
   if (Scheduler::m_verbose) std::cout << "** Generating data **\n\tBatch Size: " << m_batchSize << ", Matrix Size: "
-    << m_meanMatrixSize << ", Block Width: " << m_blockWidth << ", Threads Per Block: " << m_threadsPerBlock << "\n";
+    << m_meanMatrixSize << ", Block Width: " << m_blockWidth << "\n";
 
   for (int kernelNum = 0; kernelNum < m_batchSize; ++kernelNum)
   {
     m_data[kernelNum] = new MatrixMultiply;
-    m_data[kernelNum]->InitializeData((int)normalDist(randomGen), m_blockWidth, m_threadsPerBlock, kernelNum);
+    m_data[kernelNum]->InitializeData((int)normalDist(randomGen), m_blockWidth, kernelNum);
   }
 
   if (Scheduler::m_verbose) std::cout << "** Done generating data **\n\n";
@@ -317,14 +277,14 @@ void BatchMatrixMultiply::OutputResultsCSV(const std::string &kernelName)
   std::size_t posLast = csvKernelFile.tellp();
   if (posLast-posFirst == 0)
   {
-    csvKernelFile << "BatchSize, KernelName, MeanMatrixSize, ThreadsPerBlock, MaxDevices";
+    csvKernelFile << "BatchSize, KernelName, MeanMatrixSize, BlockWidth, MaxDevices";
     csvKernelFile << ", MaxGPUsPerKernel, KernelNum, QueueTimeMS, KernelExecTimeMS, TotalExecTimeMS\n";
   }
 
   for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
   {
     const MatrixMultiply &kernel = *m_data[kernelNum];
-    csvKernelFile << m_batchSize << ", " << kernelName.c_str() << ", " << m_meanMatrixSize << ", " << m_threadsPerBlock;
+    csvKernelFile << m_batchSize << ", " << kernelName.c_str() << ", " << m_meanMatrixSize << ", " << m_blockWidth;
     csvKernelFile << ", " << Scheduler::m_maxDevices << ", " << Scheduler::m_maxGPUsPerKernel << ", " << kernel.m_kernelNum;
     csvKernelFile << ", " << kernel.m_queueTimeMS << ", " << kernel.m_kernelExecTimeMS;
     csvKernelFile << ", " << kernel.m_totalExecTimeMS << "\n";
@@ -344,11 +304,11 @@ void BatchMatrixMultiply::OutputResultsCSV(const std::string &kernelName)
   posLast = csvBatchFile.tellp();
   if (posLast - posFirst == 0)
   {
-    csvBatchFile << "BatchSize, KernelName, MeanMatrixSize, ThreadsPerBlock, MaxDevices";
+    csvBatchFile << "BatchSize, KernelName, MeanMatrixSize, BlockWidth, MaxDevices";
     csvBatchFile << ", MaxGPUsPerKernel, BatchKernelExecTimeMS, BatchTotalExecTimeMS\n";
   }
 
-  csvBatchFile << m_batchSize << ", " << kernelName.c_str() << ", " << m_meanMatrixSize << ", " << m_threadsPerBlock;
+  csvBatchFile << m_batchSize << ", " << kernelName.c_str() << ", " << m_meanMatrixSize << ", " << m_blockWidth;
   csvBatchFile << ", " << Scheduler::m_maxDevices << ", " << Scheduler::m_maxGPUsPerKernel;
   csvBatchFile << ", " << m_batchKernelExecTimeMS << ", " << m_batchTotalExecTimeMS << "\n";
 }
@@ -401,11 +361,11 @@ void RunKernelThreaded(BatchMatrixMultiply *batch, int kernelNum)
   // Initialize C to 0
   //dim3 blocks(batch->m_threadsPerBlock, 1, 1); // Previous
   /*	
-	// MemSetKernel Utility (optional) 
-  	dim3 blocks(kernel.m_blockWidth, 1, 1); 
-  	dim3 grid(kernel.m_blocksRequired, 1, 1);
-  	MemSetKernel <<<grid, blocks >>>(kernel.m_matrixSize, kernel.m_dC);
-  	ERROR_CHECK(cudaPeekAtLastError());
+  // MemSetKernel Utility (optional) 
+    dim3 blocks(kernel.m_blockWidth, 1, 1); 
+    dim3 grid(kernel.m_blocksRequired, 1, 1);
+    MemSetKernel <<<grid, blocks >>>(kernel.m_matrixSize, kernel.m_dC);
+    ERROR_CHECK(cudaPeekAtLastError());
   */
 
   // Run the kernel

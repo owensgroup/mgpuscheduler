@@ -20,12 +20,10 @@ public:
     FreeDeviceMemory();
   }
 
-
   void FreeHostMemory();
   void FreeDeviceMemory();
 
-  float ** CreateMatrix(int m, int n);
-  void InitializeData(int matrixSize, int blockWidth, int threadsPerBlock, int kernelNum);
+  void InitializeData(int matrixSize, int blockWidth, int kernelNum);
   void FinishHostExecution();
 
   virtual int  AcquireDeviceResources(std::vector< DeviceInfo > *deviceInfo);
@@ -56,8 +54,8 @@ public:
 class BatchMatrixMultiply
 {
 public:
-  BatchMatrixMultiply(int meanMatrixSize, int blockWidth, int batchSize, int threadsPerBlock)
-    : m_meanMatrixSize(meanMatrixSize), m_blockWidth(blockWidth), m_batchSize(batchSize), m_threadsPerBlock(threadsPerBlock)
+  BatchMatrixMultiply(int meanMatrixSize, int batchSize, int blockWidth)
+    : m_meanMatrixSize(meanMatrixSize), m_blockWidth(blockWidth), m_batchSize(batchSize)
   {}
 
   ~BatchMatrixMultiply()
@@ -75,7 +73,7 @@ private:
   void GenerateData();
 
   std::vector< MatrixMultiply* > m_data;   // Data for each run of MatrixMultiply
-  int m_meanMatrixSize, m_blockWidth, m_batchSize, m_threadsPerBlock;    // Run-time parameters for this kernel
+  int m_meanMatrixSize, m_blockWidth, m_batchSize;    // Run-time parameters for this kernel
 
   float m_batchKernelExecTimeMS;  // Time from first kernel execution started to last kernel execution finished
   float m_batchTotalExecTimeMS;   // Time from first kernel data cudaMalloc to last kernel data downloaded
