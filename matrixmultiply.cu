@@ -36,7 +36,7 @@ __global__ void GPUMatrixMultiply(const int matSize, float * A, float * B, float
 
     float *sh_A = &shared[0];
     float *sh_B = &shared[sharedOffsetB];
-    
+
     unsigned int rowC = blockWidth * blockIdx.y + threadIdx.y;
     unsigned int colC = blockWidth * blockIdx.x + threadIdx.x;
 
@@ -83,9 +83,9 @@ void MatrixMultiply::FreeHostMemory()
     if (m_hCheckC[i]) free(m_hCheckC[i]);
   }*/
 
-  if (m_hA) free(m_hA);
-  if (m_hB) free(m_hB);
-  if (m_hC) free(m_hC);
+  if (m_hA) ERROR_CHECK(cudaFreeHost(m_hA));
+  if (m_hB) ERROR_CHECK(cudaFreeHost(m_hB));
+  if (m_hC) ERROR_CHECK(cudaFreeHost(m_hC));
   if (m_hCheckC) free(m_hCheckC);
   m_hA = m_hB = m_hC = m_hCheckC = NULL;
 }
@@ -119,7 +119,7 @@ void MatrixMultiply::InitializeData(int matrixSize, int blockWidth, int kernelNu
 
   m_hCheckC = (float*) malloc(sizeof(float) * matrixSize * matrixSize);
 
-  m_blocksRequired = matrixSize % blockWidth == 0 ? (matrixSize / blockWidth) : 1 + (matrixSize / blockWidth); 
+  m_blocksRequired = matrixSize % blockWidth == 0 ? (matrixSize / blockWidth) : 1 + (matrixSize / blockWidth);
   m_globalMemRequired = 3 * sizeof(float) * matrixSize * matrixSize;
 
   // Floating pt ops (M=multiply, A=add):
@@ -135,9 +135,9 @@ void MatrixMultiply::InitializeData(int matrixSize, int blockWidth, int kernelNu
   //      1M + 1A for posA
   //      1M + 1A for posB
   //      1M + 1A for temp -> TOT = 6
-  
+
   m_floatingPointOps = (float)(matrixSize * matrixSize * (8 + m_blocksRequired * (9 + blockWidth * 6)));
-  
+
   // Float memory accesses (R=read, W=write)
   // Per thread (matrixSize * matrixSize):
   //  1W -> TOT = 1
@@ -287,7 +287,7 @@ void BatchMatrixMultiply::GenerateData()
 }
 
 void BatchMatrixMultiply::ComputeBatchResults()
-{ 
+{
   // Sum up the per-kernel floating point ops and mem bytes accessed
   m_batchFloatingPointOps = m_batchMemBytesReadWrite = 0;
   for (int kernel = 0; kernel < (int)m_data.size(); ++kernel)
@@ -347,8 +347,8 @@ void BatchMatrixMultiply::OutputResultsCSV(const std::string &kernelName)
     const MatrixMultiply &kernel = *m_data[kernelNum];
     csvKernelFile << m_batchSize << ", " << kernelName.c_str() << ", " << m_meanMatrixSize << ", " << m_blockWidth
                   << ", " << Scheduler::m_maxDevices << ", " << kernel.m_kernelNum << ", " << kernel.m_queueTimeNS
-                  << ", " << kernel.m_kernelExecTimeMS << ", " << kernel.m_totalExecTimeMS 
-                  << ", " << kernel.m_floatingPointOps << ", " << kernel.m_memBytesReadWrite 
+                  << ", " << kernel.m_kernelExecTimeMS << ", " << kernel.m_totalExecTimeMS
+                  << ", " << kernel.m_floatingPointOps << ", " << kernel.m_memBytesReadWrite
                   << ", " << kernel.m_MFLOPs << ", " << kernel.m_MBps << "\n";
   }
 
@@ -371,8 +371,8 @@ void BatchMatrixMultiply::OutputResultsCSV(const std::string &kernelName)
   }
 
   csvBatchFile << m_batchSize << ", " << kernelName.c_str() << ", " << m_meanMatrixSize << ", " << m_blockWidth
-               << ", " << Scheduler::m_maxDevices << ", " << m_batchKernelExecTimeMS 
-               << ", " << m_batchTotalExecTimeMS << ", " << m_batchFloatingPointOps 
+               << ", " << Scheduler::m_maxDevices << ", " << m_batchKernelExecTimeMS
+               << ", " << m_batchTotalExecTimeMS << ", " << m_batchFloatingPointOps
                << ", " << m_batchMemBytesReadWrite << ", " << m_batchGFLOPs << ", " << m_batchGBps << "\n";
 }
 
