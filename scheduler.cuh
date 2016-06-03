@@ -25,7 +25,7 @@ public:
   virtual int  AcquireDeviceResources(std::vector< DeviceInfo > *deviceInfo) = 0; // Acquire GPU resources for some device 
   virtual void ReleaseDeviceResources(std::vector< DeviceInfo > *deviceInfo) = 0; // Release GPU resources for chosen device
   
-  std::mutex m_deviceInfoMutex; // Needed for locking GPU resources
+  
 };
 
 class Scheduler
@@ -34,8 +34,9 @@ public:
   static void  GetDeviceInfo();
 
   static std::vector< DeviceInfo > m_deviceInfo;  // Resources available on GPUs
-  static int m_maxDevices;    // Run-time parameters for the GPU(s)
-  static bool m_verbose;      // Validate and print results (don't want to do while timing)
+  static int m_maxDevices;                        // Run-time parameters for the GPU(s)
+  static bool m_verbose;                          // Validate and print results (don't want to do while timing)
+  static std::mutex m_deviceInfoMutex;            // Needed for locking GPU resources
 };
 
 

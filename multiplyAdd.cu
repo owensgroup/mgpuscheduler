@@ -91,7 +91,7 @@ void MultiplyAdd::InitializeData(int vectorSize, int threadsPerBlock, int kernel
 int MultiplyAdd::AcquireDeviceResources(std::vector< DeviceInfo > *deviceInfo)
 {
   // Lock this method
-  std::lock_guard< std::mutex > guard(m_deviceInfoMutex); // Automatically unlocks when destroyed
+  std::lock_guard< std::mutex > guard(Scheduler::m_deviceInfoMutex); // Automatically unlocks when destroyed
 
   int deviceNum, freeDeviceNum = -1;
   for (deviceNum = 0; deviceNum < (int)deviceInfo->size(); ++deviceNum)
@@ -131,7 +131,7 @@ int MultiplyAdd::AcquireDeviceResources(std::vector< DeviceInfo > *deviceInfo)
 void MultiplyAdd::ReleaseDeviceResources(std::vector< DeviceInfo > *deviceInfo)
 {
   // Lock this method
-  std::lock_guard< std::mutex > guard(m_deviceInfoMutex); // Automatically unlocks when destroyed
+  std::lock_guard< std::mutex > guard(Scheduler::m_deviceInfoMutex); // Automatically unlocks when destroyed
 
   DeviceInfo &device = deviceInfo->operator[](m_deviceNum);
 

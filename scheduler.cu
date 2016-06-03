@@ -6,6 +6,7 @@
 std::vector< DeviceInfo > Scheduler::m_deviceInfo = std::vector< DeviceInfo >(); // Static member variable initialization
 int Scheduler::m_maxDevices = 0;
 bool Scheduler::m_verbose = false;
+std::mutex Scheduler::m_deviceInfoMutex;
 
 /**
 * @brief Macro for error checking for all GPU calls
@@ -36,7 +37,7 @@ void DeviceInfo::SetDeviceInfo(int deviceNum)
   m_totalCores = _ConvertSMVer2Cores(deviceProp.major, deviceProp.minor) * deviceProp.multiProcessorCount;
   m_totalBlocksDimX = deviceProp.maxGridSize[0];
 
-  m_remainingGlobalMem = m_totalGlobalMem;
+  m_remainingGlobalMem = m_totalGlobalMem - 500*(1024*1024); // "Reserve" 100MB
   m_remainingTotalCores = m_totalCores;
   m_remainingBlocksDimX = m_totalBlocksDimX;
 }
