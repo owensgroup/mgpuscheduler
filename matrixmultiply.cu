@@ -92,6 +92,7 @@ void MatrixMultiply::FreeHostMemory()
 
 void MatrixMultiply::FreeDeviceMemory()
 {
+  ERROR_CHECK(cudaSetDevice(m_deviceNum));
   if (m_dA) ERROR_CHECK(cudaFree(m_dA));
   if (m_dB) ERROR_CHECK(cudaFree(m_dB));
   if (m_dC) ERROR_CHECK(cudaFree(m_dC));
@@ -144,13 +145,6 @@ void MatrixMultiply::InitializeData(int matrixSize, int blockWidth, int kernelNu
   // Remember to first multiply by 4 for floats
   m_memBytesReadWrite = 4.0f * (matrixSize * matrixSize * (1 + m_blocksRequired * (4 + blockWidth * 2)));
 
-  ERROR_CHECK(cudaStreamCreate(&m_stream));
-  ERROR_CHECK(cudaEventCreate(&m_startQueueEvent));
-  ERROR_CHECK(cudaEventCreate(&m_startExecEvent));
-  ERROR_CHECK(cudaEventCreate(&m_finishExecEvent));
-  ERROR_CHECK(cudaEventCreate(&m_startCudaMallocEvent));
-  ERROR_CHECK(cudaEventCreate(&m_finishDownloadEvent));
-
   //float invRandMax = 1000.0f / RAND_MAX; // Produces random numbers between 0 and 1000
   for (int i = 0; i < matrixSize*matrixSize; i++) {
     m_hA[i] = 2.0f; // std::rand() * invRandMax;
@@ -160,14 +154,16 @@ void MatrixMultiply::InitializeData(int matrixSize, int blockWidth, int kernelNu
     m_hCheckC[i] = 0.0f;
   }
 
-  for (int x = 0; x < matrixSize; x++) { // row number of output
-    for (int y = 0; y < matrixSize; y++) { // column number of output
+  if (Scheduler::m_verbose)
+  {
+    for (int x = 0; x < matrixSize; x++) { // row number of output
+      for (int y = 0; y < matrixSize; y++) { // column number of output
         for (int z = 0; z < matrixSize; z++) { // four elements are added for this output
-            m_hCheckC[matrixSize*x+y] += m_hA[matrixSize*x+z] * m_hB[matrixSize*z+y];
+         // m_hCheckC[matrixSize*x + y] += m_hA[matrixSize*x + z] * m_hB[matrixSize*z + y];
         }
+      }
     }
-}
-
+  }
 }
 
 /**
@@ -184,10 +180,26 @@ int MatrixMultiply::AcquireDeviceResources(std::vector< DeviceInfo > *deviceInfo
     DeviceInfo &device = deviceInfo->operator[](deviceNum);
     if (m_globalMemRequired < device.m_remainingGlobalMem && m_blocksRequired < device.m_remainingBlocksDimX)
     {
+      if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << " acquired GPU " << deviceNum << " **\n";
+      if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ":  Prev Memory: " << device.m_remainingGlobalMem / (1024.0*1024.0) << "MB, Blocks: " << device.m_remainingBlocksDimX << "\n";
+
       freeDeviceNum = deviceNum;
       device.m_remainingGlobalMem -= m_globalMemRequired;
       device.m_remainingBlocksDimX -= m_blocksRequired;
+
+      if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ": - Used Memory: " << m_globalMemRequired/(1024.0*1024.0) << "MB, Blocks: " << m_blocksRequired << "\n";
+      if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ": =  New Memory: " << device.m_remainingGlobalMem / (1024.0*1024.0) << "MB, Blocks: " << device.m_remainingBlocksDimX << "\n";
+      if (Scheduler::m_verbose) std::flush(std::cout);
+
       break;
+    }
+    else
+    {
+      if (Scheduler::m_verbose) std::cout << "\n**********************************************************************\n";
+      if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << " >> Unable to be acquired by device " << deviceNum << "\n";
+      if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ": Kernel Memory: " << m_globalMemRequired / (1024.0*1024.0) << "MB, Blocks: " << m_blocksRequired << "\n";
+      if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ": Device Memory: " << device.m_remainingGlobalMem / (1024.0*1024.0) << "MB, Blocks: " << device.m_remainingBlocksDimX << "\n";
+      if (Scheduler::m_verbose) std::cout << "**********************************************************************\n";
     }
   }
 
@@ -202,11 +214,17 @@ void MatrixMultiply::ReleaseDeviceResources(std::vector< DeviceInfo > *deviceInf
   // Lock this method
   std::lock_guard< std::mutex > guard(m_deviceInfoMutex); // Automatically unlocks when destroyed
 
-  if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << " released GPU " << m_deviceNum << " **\n";
-
   DeviceInfo &device = deviceInfo->operator[](m_deviceNum);
+
+  if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << " released GPU " << m_deviceNum << " **\n";
+  if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ": Prev Memory: " << device.m_remainingGlobalMem / (1024.0*1024.0) << "MB, Blocks: " << device.m_remainingBlocksDimX << "\n";
+
   device.m_remainingGlobalMem += m_globalMemRequired;
   device.m_remainingBlocksDimX += m_blocksRequired;
+
+  if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ": + Used Memory: " << m_globalMemRequired / (1024.0*1024.0) << "MB, Blocks: " << m_blocksRequired << "\n";
+  if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ": =  New Memory: " << device.m_remainingGlobalMem / (1024.0*1024.0) << "MB, Blocks: " << device.m_remainingBlocksDimX << "\n";
+  if (Scheduler::m_verbose) std::flush(std::cout);
 
   // Result is already in host memory, so free GPU memory
   FreeDeviceMemory();
@@ -215,10 +233,9 @@ void MatrixMultiply::ReleaseDeviceResources(std::vector< DeviceInfo > *deviceInf
 /**
 * @brief Execution is complete. Record completion event and timers, verify result, and free host memory.
 */
-void MatrixMultiply::FinishHostExecution()
+void MatrixMultiply::FinishHostExecution(bool freeHostMemory)
 {
   // Update timers
-  ERROR_CHECK(cudaEventElapsedTime(&m_queueTimeMS, m_startQueueEvent, m_startCudaMallocEvent));
   ERROR_CHECK(cudaEventElapsedTime(&m_kernelExecTimeMS, m_startExecEvent, m_finishExecEvent));
   ERROR_CHECK(cudaEventElapsedTime(&m_totalExecTimeMS, m_startCudaMallocEvent, m_finishDownloadEvent));
 
@@ -233,10 +250,11 @@ void MatrixMultiply::FinishHostExecution()
   }
 
   if (Scheduler::m_verbose) printf("Kernel %d >> Device: %d, Queue: %.3fms, Kernel: %.3fms, Total: %.3fms, MFLOP/s: %.2f, MB/s: %.2f, Correct: %s\n",
-    m_kernelNum, m_deviceNum, m_queueTimeMS, m_kernelExecTimeMS, m_totalExecTimeMS, m_MFLOPs, m_MBps, correct ? "True" : "False");
+    m_kernelNum, m_deviceNum, m_queueTimeNS, m_kernelExecTimeMS, m_totalExecTimeMS, m_MFLOPs, m_MBps, correct ? "True" : "False");
 
   // Free memory
-  FreeHostMemory();
+  if (freeHostMemory)
+    FreeHostMemory();
 }
 
 /**
@@ -280,7 +298,7 @@ void BatchMatrixMultiply::ComputeBatchResults()
   {
     bool operator()(const MatrixMultiply *lhs, const MatrixMultiply *rhs)
     {
-      return lhs->m_queueTimeMS < rhs->m_queueTimeMS;
+      return lhs->m_queueTimeNS < rhs->m_queueTimeNS;
     }
   };
 
@@ -325,7 +343,7 @@ void BatchMatrixMultiply::OutputResultsCSV(const std::string &kernelName)
   {
     const MatrixMultiply &kernel = *m_data[kernelNum];
     csvKernelFile << m_batchSize << ", " << kernelName.c_str() << ", " << m_meanMatrixSize << ", " << m_blockWidth
-                  << ", " << Scheduler::m_maxDevices << ", " << kernel.m_kernelNum << ", " << kernel.m_queueTimeMS
+                  << ", " << Scheduler::m_maxDevices << ", " << kernel.m_kernelNum << ", " << kernel.m_queueTimeNS
                   << ", " << kernel.m_kernelExecTimeMS << ", " << kernel.m_totalExecTimeMS 
                   << ", " << kernel.m_floatingPointOps << ", " << kernel.m_memBytesReadWrite 
                   << ", " << kernel.m_MFLOPs << ", " << kernel.m_MBps << "\n";
@@ -363,6 +381,10 @@ void RunKernelThreaded(BatchMatrixMultiply *batch, int kernelNum)
   // Acquire a GPU
   int deviceNum = -1;
   bool firstAttempt = true;
+
+  typedef std::chrono::high_resolution_clock clock;
+  auto startQueue = clock::now();
+
   while (deviceNum < 0)
   {
     if (firstAttempt)
@@ -375,18 +397,29 @@ void RunKernelThreaded(BatchMatrixMultiply *batch, int kernelNum)
     deviceNum = kernel.AcquireDeviceResources(&Scheduler::m_deviceInfo);
   }
 
+  // Get the time spent in the queue
+  auto finishQueue = clock::now();
+  std::chrono::duration< double > diff;
+  kernel.m_queueTimeNS = (float)(1000 * diff.count());
+
   if (Scheduler::m_verbose) std::cout << "** Kernel " << kernelNum << " acquired GPU " << deviceNum << " **\n";
 
   // Store the device number for use in ReleaseDeviceResources() - not strictly necessary, could be passed in
   kernel.m_deviceNum = deviceNum;
 
+  // Set the device and create the stream and events
+  ERROR_CHECK(cudaSetDevice(deviceNum));
+  ERROR_CHECK(cudaStreamCreate(&kernel.m_stream));
+  ERROR_CHECK(cudaEventCreate(&kernel.m_startExecEvent));
+  ERROR_CHECK(cudaEventCreate(&kernel.m_finishExecEvent));
+  ERROR_CHECK(cudaEventCreate(&kernel.m_startCudaMallocEvent));
+  ERROR_CHECK(cudaEventCreate(&kernel.m_finishDownloadEvent));
+
   // Mark the start total execution event
   ERROR_CHECK(cudaEventRecord(kernel.m_startCudaMallocEvent, kernel.m_stream));
 
-  // We've got a GPU, use it
   // Allocate memory on the GPU for input and output data
   std::size_t vectorBytes(kernel.m_matrixSize * kernel.m_matrixSize * sizeof(float));
-  ERROR_CHECK(cudaSetDevice(deviceNum));
   ERROR_CHECK(cudaMalloc((void**)&kernel.m_dA, vectorBytes));
   ERROR_CHECK(cudaMalloc((void**)&kernel.m_dB, vectorBytes));
   ERROR_CHECK(cudaMalloc((void**)&kernel.m_dC, vectorBytes));
@@ -404,7 +437,8 @@ void RunKernelThreaded(BatchMatrixMultiply *batch, int kernelNum)
   size_t sharedMemBytes = 2 * sizeof(float) * kernel.m_blockWidth * kernel.m_blockWidth;
   dim3 dimBlock(kernel.m_blockWidth, kernel.m_blockWidth, 1); // Same dims as other kernel
   dim3 dimGrid(kernel.m_blocksRequired, kernel.m_blocksRequired, 1);
-  GPUMatrixMultiply<<<dimGrid, dimBlock, sharedMemBytes, kernel.m_stream >>>(kernel.m_matrixSize, kernel.m_dA, kernel.m_dB, kernel.m_dC);
+  //std::cout << "Grid: " << kernel.m_blocksRequired << ", Block: " << kernel.m_blockWidth << ", Shared: " << sharedMemBytes << "\n";
+  GPUMatrixMultiply<<< dimGrid, dimBlock, sharedMemBytes, kernel.m_stream >>>(kernel.m_matrixSize, kernel.m_dA, kernel.m_dB, kernel.m_dC);
   ERROR_CHECK(cudaPeekAtLastError());
 
   // Record the time (since stream is non-zero, waits for stream to be complete)
@@ -430,36 +464,34 @@ void RunKernelThreaded(BatchMatrixMultiply *batch, int kernelNum)
 /**
 * @brief Run the experiment on a large batch of MatrixMultiply kernels, by using separate CUDA streams per run.
 */
-void BatchMatrixMultiply::RunExperiment(const std::string &kernelName)
+void BatchMatrixMultiply::RunExperiment(const std::string &kernelName, int numRepeat)
 {
   Scheduler::GetDeviceInfo();
   GenerateData();
 
-  // Mark start queue events (needs to be done here, b/c CPU threads will block eachother)
-  for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
-    ERROR_CHECK(cudaEventRecord(m_data[kernelNum]->m_startQueueEvent, m_data[kernelNum]->m_stream));
-
-  // Call each kernel instance with a std::thread object
-  std::thread *threads = new std::thread[m_data.size()];
-  for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
-    threads[kernelNum] = std::thread(RunKernelThreaded, this, kernelNum);
-
-  // Wait for all threads to finish
-  for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
-    threads[kernelNum].join();
-
-  // Validate and print results
-  if (Scheduler::m_verbose) std::cout << "\n** Kernel Results **\n";
-  for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
+  for (int n = 0; n < numRepeat; ++n)
   {
-    m_data[kernelNum]->FinishHostExecution();
+    // Call each kernel instance with a std::thread object
+    std::thread *threads = new std::thread[m_data.size()];
+    for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
+      threads[kernelNum] = std::thread(RunKernelThreaded, this, kernelNum);
+
+    // Wait for all threads to finish
+    for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
+      threads[kernelNum].join();
+
+    // Validate and print results
+    if (Scheduler::m_verbose) std::cout << "\n** Kernel Results **\n";
+    bool freeHostMemory = n == (numRepeat - 1); // Only free host memory on the last iteration
+    for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
+    {
+      m_data[kernelNum]->FinishHostExecution(freeHostMemory);
+    }
+
+    // Compute accumulated batch results
+    ComputeBatchResults();
+
+    // Record results to CSV
+    OutputResultsCSV(kernelName);
   }
-
-  // Compute accumulated batch results
-  ComputeBatchResults();
-
-  // Record results to CSV
-  OutputResultsCSV(kernelName);
-
-  ERROR_CHECK(cudaDeviceSynchronize());
 }

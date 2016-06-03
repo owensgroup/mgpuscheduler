@@ -24,7 +24,7 @@ public:
   void FreeDeviceMemory();
 
   void InitializeData(int matrixSize, int blockWidth, int kernelNum);
-  void FinishHostExecution();
+  void FinishHostExecution(bool freeHostMemory);
 
   virtual int  AcquireDeviceResources(std::vector< DeviceInfo > *deviceInfo);
   virtual void ReleaseDeviceResources(std::vector< DeviceInfo > *deviceInfo);
@@ -44,10 +44,10 @@ public:
   float m_MBps;               // Number of MB per second for this kernel
 
   int m_kernelNum, m_deviceNum;                  // Kernel num and GPU device this kernel executed on
-  float m_queueTimeMS, m_kernelExecTimeMS, m_totalExecTimeMS; // Timers for timing this kernel
+  float m_queueTimeNS, m_kernelExecTimeMS, m_totalExecTimeMS; // Timers for timing this kernel (NS = nanoseconds, MS = microseconds)
 
   cudaStream_t m_stream;  // Stream for asynchrnous execution - assumes only one GPU for this kernel
-  cudaEvent_t m_startQueueEvent, m_startExecEvent, m_finishExecEvent; // Events for timing queue and kernel execution
+  cudaEvent_t m_startExecEvent, m_finishExecEvent; // Events for timing queue and kernel execution
   cudaEvent_t m_startCudaMallocEvent, m_finishDownloadEvent; // Events for timing the total execution, malloc to download
 };
 
@@ -64,7 +64,7 @@ public:
       if (*it) delete *it;
   }
 
-  void RunExperiment(const std::string &kernelName);
+  void RunExperiment(const std::string &kernelName, int numRepeat);
   void ComputeBatchResults();
   void OutputResultsCSV(const std::string &kernelName);
   friend void RunKernelThreaded(BatchMatrixMultiply *batch, int kernelNum);

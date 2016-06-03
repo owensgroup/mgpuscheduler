@@ -11,22 +11,23 @@ def main(argv):
    args = parser.parse_args()
 
    # Debugging experiment values
-   threadsPerBlockList = [1024]
+   #threadsPerBlockList = [1024]
    #vectorSizeList = [1024, 16384, 65536]
-   vectorSizeList = [1024]
-   matrixSizeList = [32]
-   maxDevicesList = [1]
-   batchSizeList = [128]
-   numRepeat = 1
+   #vectorSizeList = [1024]
+   #matrixSizeList = [32]
+   #maxDevicesList = [1]
+   #batchSizeList = [128]
+   #numRepeat = 1
    #batchSizeList = [128, 512, 1024]
 
    # Real experiment values
-   #threadsPerBlockList = [128, 256, 512, 1024]
-   #vectorSizeList = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144] # MUST be same number of elements as matrixSizeList
-   #matrixSizeList = [32, 64, 128, 256, 512, 1024, 2048, 4096, 8192] # MUST be same number of elements as vectorSizeList
-   #maxDevicesList = [1, 2]
-   #batchSizeList = [32, 64, 128, 256, 512, 1024]
-   #numRepeat = 3
+   threadsPerBlockList = [256, 512, 1024]
+   blockWidthList = [8, 16, 32] 
+   vectorSizeList = [8192, 16384, 32768, 65536, 131072, 262144] # MUST be same number of elements as matrixSizeList
+   matrixSizeList = [32, 64, 128, 256, 512, 1024, 2048, 4096, 8192] # MUST be same number of elements as vectorSizeList
+   maxDevicesList = [1, 2]
+   batchSizeList = [32, 64, 128, 256, 512, 1024]
+   numRepeat = 3
    verboseFlag = 1 # Use 1 to debug for now, then 0 to run
    
    # "Usage: <ExecPath> inputSize batchSize maxDevices kernelName kernelArgument verboseOutput\n"
@@ -35,24 +36,25 @@ def main(argv):
       startInputSize = timer()
       for batchSize in batchSizeList:
          startBatchSize = timer()
-         for threadsPerBlock in threadsPerBlockList:
+         for kernelArgumentIndex in range(len(threadsPerBlockList)):
             for maxDevices in maxDevicesList:
-               for numRepeat in range(numRepeat):
-                  # First, run MultiplyAdd
-                  vectorSize = vectorSizeList[inputIndex]
-                  print('Input: {0}, Batch: {1}, Threads: {2}, GPUs: {3}...'.format(vectorSize, batchSize, threadsPerBlock, maxDevices))
-                  startCall = timer() 
-                  subprocess.call([args.executable, str(vectorSize), str(batchSize), str(maxDevices), 'MultiplyAdd', str(threadsPerBlock), str(verboseFlag)]) 
-                  endCall = timer()
-                  print('\t... Done, {0}s'.format(endCall-startCall))
+               # First, run MultiplyAdd
+               vectorSize = vectorSizeList[inputIndex]
+               threadsPerBlock = threadsPerBlockList[kernelArgumentIndex]
+               print('Input: {0}, Batch: {1}, Threads: {2}, GPUs: {3}...'.format(vectorSize, batchSize, threadsPerBlock, maxDevices))
+               startCall = timer() 
+               subprocess.call([args.executable, str(vectorSize), str(batchSize), str(maxDevices), 'MultiplyAdd', str(threadsPerBlock), str(numRepeat), str(verboseFlag)]) 
+               endCall = timer()
+               print('\t... Done, {0}s'.format(endCall-startCall))
 
-                  # Second, run MatrixMultiply
-                  #matrixSize = matrixSizeList[inputIndex]
-                  #print('Input: {0}, Batch: {1}, Threads: {2}, GPUs: {3}...'.format(matrixSize, batchSize, threadsPerBlock, maxDevices))
-                  #startCall = timer() 
-                  #subprocess.call([args.executable, str(matrixSize), str(batchSize), str(maxDevices), 'MatrixMultiply', str(threadsPerBlock), str(verboseFlag)]) 
-                  #endCall = timer()
-                  #print('\t... Done, {0}s'.format(endCall-startCall))
+               # Second, run MatrixMultiply
+               matrixSize = matrixSizeList[inputIndex]
+               blockWidth = blockWidthList[kernelArgumentIndex]
+               print('Input: {0}, Batch: {1}, Threads: {2}, GPUs: {3}...'.format(matrixSize, batchSize, blockWidth, maxDevices))
+               startCall = timer() 
+               subprocess.call([args.executable, str(matrixSize), str(batchSize), str(maxDevices), 'MatrixMultiply', str(blockWidth), str(verboseFlag)]) 
+               endCall = timer()
+               print('\t... Done, {0}s'.format(endCall-startCall))
 
          endBatchSize = timer()
          print('------------------------------------------------')

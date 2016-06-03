@@ -22,9 +22,9 @@ public:
   */
   bool ParseCommandLine(int argc, char **argv)
   {
-    if (argc != 7)
+    if (argc != 8)
     {
-      fprintf(stderr, "Usage: %s inputSize batchSize maxDevices kernelName kernelArgument verboseOutput\n", argv[0]);
+      fprintf(stderr, "Usage: %s inputSize batchSize maxDevices kernelName kernelArgument numRepeat verboseOutput\n", argv[0]);
       return false;
     }
 
@@ -34,17 +34,19 @@ public:
     m_maxDevices = atoi(argv[3]);
     m_kernelName = std::string(argv[4]);
     m_kernelArgument = atoi(argv[5]);
-    m_verbose = atoi(argv[6]) == 0 ? false : true;
+    m_numRepeat = atoi(argv[6]);
+    m_verbose = atoi(argv[7]) == 0 ? false : true;
 
     return true;
   }
 
-  int m_inputSize;
-  int m_batchSize;
-  int m_maxDevices;
-  int m_kernelArgument;
-  std::string m_kernelName;
-  bool m_verbose;
+  int m_inputSize;          // Kernel input size (e.g. vector size or matrix size)
+  int m_batchSize;          // Batch size, number of kernels to queue up and run as a batch
+  int m_maxDevices;         // Number of GPUs to use (auto limited by maximum available)
+  int m_kernelArgument;     // Single kernel argument (e.g. threads per block)
+  std::string m_kernelName; // Kernel name, for CSV output
+  int m_numRepeat;          // Number of times to repeat a single experiment, for better data
+  bool m_verbose;           // Verbose flag (needs to be false for gathering real results)
 };
 
 int main(int argc, char** argv)
@@ -62,14 +64,14 @@ int main(int argc, char** argv)
   {
     int &threadsPerBlock = args.m_kernelArgument;
     BatchMultiplyAdd batchMultAdd(args.m_inputSize, args.m_batchSize, threadsPerBlock);
-    batchMultAdd.RunExperiment(std::string("MultiplyAdd"));
+    batchMultAdd.RunExperiment(std::string("MultiplyAdd"), args.m_numRepeat);
   }
   // Run the experiment for MatrixMultiply
   else if (args.m_kernelName == std::string("MatrixMultiply"))
   {
     int &blockWidth = args.m_kernelArgument;
     BatchMatrixMultiply batchMtxMulti(args.m_inputSize, args.m_batchSize, blockWidth);
-    batchMtxMulti.RunExperiment(std::string("MatrixMultiply"));
+    batchMtxMulti.RunExperiment(std::string("MatrixMultiply"), args.m_numRepeat);
   }
 
   return 0;
