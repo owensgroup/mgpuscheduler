@@ -22,9 +22,9 @@ public:
   */
   bool ParseCommandLine(int argc, char **argv)
   {
-    if (argc != 7)
+    if (argc != 9)
     {
-      fprintf(stderr, "Usage: %s meanVectorSize batchSize maxDevices threadsPerBlock maxGPUsPerKernel verboseOutput\n", argv[0]);
+      fprintf(stderr, "Usage: %s meanVectorSize batchSize maxDevices threadsPerBlock maxGPUsPerKernel kernelName kernelArgument verboseOutput\n", argv[0]);
       return false;
     }
 
@@ -34,7 +34,9 @@ public:
     m_maxDevices = atoi(argv[3]);
     m_threadsPerBlock = atoi(argv[4]);
     m_maxGPUsPerKernel = atoi(argv[5]);
-    m_verbose = atoi(argv[6]) == 0 ? false : true;
+    m_kernelName = std::string(argv[6]);
+    m_kernelArgument = atoi(argv[7]);
+    m_verbose = atoi(argv[8]) == 0 ? false : true;
 
     return true;
   }
@@ -44,6 +46,8 @@ public:
   int m_maxDevices;
   int m_threadsPerBlock;
   int m_maxGPUsPerKernel;
+  int m_kernelArgument;
+  std::string m_kernelName;
   bool m_verbose;
 };
 
@@ -59,12 +63,18 @@ int main(int argc, char** argv)
   Scheduler::m_verbose = args.m_verbose;
 
   // Run the experiment for MultiplyAdd
-  BatchMultiplyAdd batchMultAdd(args.m_meanVectorSize, args.m_batchSize, args.m_threadsPerBlock);
-  batchMultAdd.RunExperiment(std::string("MultiplyAdd"));
-
+  if (args.m_kernelName == std::string("MultiplyAdd"))
+  {
+    BatchMultiplyAdd batchMultAdd(args.m_meanVectorSize, args.m_batchSize, args.m_threadsPerBlock);
+    batchMultAdd.RunExperiment(std::string("MultiplyAdd"));
+  }
   // Run the experiment for MatrixMultiply
-  BatchMatrixMultiply batchMtxMulti(args.m_meanVectorSize, args.m_batchSize, args.m_threadsPerBlock);
-  batchMtxMulti.RunExperiment(std::string("MatrixMultiply"));
+  else if (args.m_kernelName == std::string("MatrixMultiply"))
+  {
+    int &blockWidth = args.m_kernelArgument;
+    BatchMatrixMultiply batchMtxMulti(args.m_meanVectorSize, blockWidth, args.m_batchSize, args.m_threadsPerBlock);
+    batchMtxMulti.RunExperiment(std::string("MatrixMultiply"));
+  }
 
   return 0;
 }

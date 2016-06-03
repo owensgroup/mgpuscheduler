@@ -36,6 +36,11 @@ public:
   unsigned long long  m_globalMemRequired;  // The amount of global device memory required
   int m_blocksRequired;                     // Blocks required, first-dimension only (for the 3-D blocks per grid)
 
+  float m_floatingPointOps;   // Number of floating point operations used to execute this kernel
+  float m_MFLOPs;             // Number of MFLOPs per second for this kernel
+  float m_memBytesReadWrite;  // Number of bytes of memory read and written to execute this kernel
+  float m_MBps;               // Number of MB per second for this kernel
+
   int m_kernelNum, m_deviceNum;                  // Kernel num and GPU device this kernel executed on
   float m_queueTimeMS, m_kernelExecTimeMS, m_totalExecTimeMS; // Timers for timing this kernel
 
@@ -69,7 +74,13 @@ private:
   int m_meanVectorSize, m_batchSize, m_threadsPerBlock;    // Run-time parameters for this kernel
 
   float m_batchKernelExecTimeMS;  // Time from first kernel execution started to last kernel execution finished
-  float m_batchTotalExecTimeMS;   // Time from first kernel data cudaMalloc to last kernel data downloaded 
+  float m_batchTotalExecTimeMS;   // Time from first kernel data cudaMalloc to last kernel data downloaded
+
+  float m_batchFloatingPointOps; // Total floating point ops for this batch
+  float m_batchGFLOPs;  // Total GFLOP/s for this batc
+ 
+  float m_batchMemBytesReadWrite; // Total bytes of memory read and written for this batch
+  float m_batchGBps;   // Total GB/s for this batch
 };
 
 #endif // #ifndef BATCH_RUN_H
