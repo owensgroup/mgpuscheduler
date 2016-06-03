@@ -5,7 +5,6 @@
 
 std::vector< DeviceInfo > Scheduler::m_deviceInfo = std::vector< DeviceInfo >(); // Static member variable initialization
 int Scheduler::m_maxDevices = 0;
-int Scheduler::m_maxGPUsPerKernel = 0;
 bool Scheduler::m_verbose = false;
 
 /**

@@ -34,7 +34,7 @@ public:
   static void  GetDeviceInfo();
 
   static std::vector< DeviceInfo > m_deviceInfo;  // Resources available on GPUs
-  static int m_maxDevices, m_maxGPUsPerKernel;    // Run-time parameters for the GPU(s)
+  static int m_maxDevices;    // Run-time parameters for the GPU(s)
   static bool m_verbose;                                 // Print results (don't want to do while timing)
 };
 

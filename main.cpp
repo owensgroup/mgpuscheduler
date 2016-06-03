@@ -22,9 +22,9 @@ public:
   */
   bool ParseCommandLine(int argc, char **argv)
   {
-    if (argc != 8)
+    if (argc != 7)
     {
-      fprintf(stderr, "Usage: %s inputSize batchSize maxDevices maxGPUsPerKernel kernelName kernelArgument verboseOutput\n", argv[0]);
+      fprintf(stderr, "Usage: %s inputSize batchSize maxDevices kernelName kernelArgument verboseOutput\n", argv[0]);
       return false;
     }
 
@@ -32,10 +32,9 @@ public:
     m_inputSize = atoi(argv[1]);
     m_batchSize = atoi(argv[2]);
     m_maxDevices = atoi(argv[3]);
-    m_maxGPUsPerKernel = atoi(argv[4]);
-    m_kernelName = std::string(argv[5]);
-    m_kernelArgument = atoi(argv[6]);
-    m_verbose = atoi(argv[7]) == 0 ? false : true;
+    m_kernelName = std::string(argv[4]);
+    m_kernelArgument = atoi(argv[5]);
+    m_verbose = atoi(argv[6]) == 0 ? false : true;
 
     return true;
   }
@@ -43,7 +42,6 @@ public:
   int m_inputSize;
   int m_batchSize;
   int m_maxDevices;
-  int m_maxGPUsPerKernel;
   int m_kernelArgument;
   std::string m_kernelName;
   bool m_verbose;
@@ -57,7 +55,6 @@ int main(int argc, char** argv)
 
   // Set the scheduler parameters
   Scheduler::m_maxDevices = args.m_maxDevices;
-  Scheduler::m_maxGPUsPerKernel = args.m_maxGPUsPerKernel;
   Scheduler::m_verbose = args.m_verbose;
 
   // Run the experiment for MultiplyAdd

@@ -238,19 +238,17 @@ void BatchMultiplyAdd::OutputResultsCSV(const std::string &kernelName)
   std::size_t posLast = csvKernelFile.tellp();
   if (posLast-posFirst == 0)
   {
-    csvKernelFile << "BatchSize, KernelName, MeanVectorSize, ThreadsPerBlock, MaxDevices"
-                  << ", MaxGPUsPerKernel, KernelNum, QueueTimeMS, KernelExecTimeMS, TotalExecTimeMS"
-                  << ", FloatingPtOps, MemBytes, MFLOPs, MBps\n";
+    csvKernelFile << "BatchSize, KernelName, MeanVectorSize, ThreadsPerBlock, MaxDevices, KernelNum, QueueTimeMS"
+                  << ", KernelExecTimeMS, TotalExecTimeMS, FloatingPtOps, MemBytes, MFLOPs, MBps\n";
   }
 
   for (int kernelNum = 0; kernelNum < (int)m_data.size(); ++kernelNum)
   {
     const MultiplyAdd &kernel = *m_data[kernelNum];
     csvKernelFile << m_batchSize << ", " << kernelName.c_str() << ", " << m_meanVectorSize << ", " << m_threadsPerBlock
-      << ", " << Scheduler::m_maxDevices << ", " << Scheduler::m_maxGPUsPerKernel << ", " << kernel.m_kernelNum
-      << ", " << kernel.m_queueTimeMS << ", " << kernel.m_kernelExecTimeMS
-      << ", " << kernel.m_totalExecTimeMS << ", " << kernel.m_floatingPointOps << ", "
-      << kernel.m_memBytesReadWrite << ", " << kernel.m_MFLOPs << ", " << kernel.m_MBps << "\n";
+      << ", " << Scheduler::m_maxDevices << ", " << kernel.m_kernelNum << ", " << kernel.m_queueTimeMS 
+      << ", " << kernel.m_kernelExecTimeMS << ", " << kernel.m_totalExecTimeMS << ", " << kernel.m_floatingPointOps 
+      << ", " << kernel.m_memBytesReadWrite << ", " << kernel.m_MFLOPs << ", " << kernel.m_MBps << "\n";
   }
 
   // Second output data summary for this batch run
@@ -267,16 +265,14 @@ void BatchMultiplyAdd::OutputResultsCSV(const std::string &kernelName)
   posLast = csvBatchFile.tellp();
   if (posLast - posFirst == 0)
   {
-    csvBatchFile << "BatchSize, KernelName, MeanVectorSize, ThreadsPerBlock, MaxDevices"
-                << ", MaxGPUsPerKernel, BatchKernelExecTimeMS, BatchTotalExecTimeMS"
-                << ", FloatingPtOps, MemBytes, GFLOPs, GBps\n";
+    csvBatchFile << "BatchSize, KernelName, MeanVectorSize, ThreadsPerBlock, MaxDevices, BatchKernelExecTimeMS"
+                << ", BatchTotalExecTimeMS, FloatingPtOps, MemBytes, GFLOPs, GBps\n";
   }
 
   csvBatchFile << m_batchSize << ", " << kernelName.c_str() << ", " << m_meanVectorSize << ", " << m_threadsPerBlock
-                << ", " << Scheduler::m_maxDevices << ", " << Scheduler::m_maxGPUsPerKernel
-                << ", " << m_batchKernelExecTimeMS << ", " << m_batchTotalExecTimeMS
-                << ", " << m_batchFloatingPointOps << ", " << m_batchMemBytesReadWrite 
-                << ", " << m_batchGFLOPs << ", " << m_batchGBps << "\n";
+                << ", " << Scheduler::m_maxDevices << ", " << m_batchKernelExecTimeMS << ", " << m_batchTotalExecTimeMS
+                << ", " << m_batchFloatingPointOps << ", " << m_batchMemBytesReadWrite << ", " << m_batchGFLOPs 
+                << ", " << m_batchGBps << "\n";
 }
 
 // NVCC having trouble parsing the std::thread() call when this is a member function, so keeping it non-member friend
