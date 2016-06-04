@@ -7,6 +7,8 @@
 
 #include "scheduler.cuh"
 
+typedef std::chrono::time_point<std::chrono::high_resolution_clock> Time;
+
 class MultiplyAdd : public ScheduledKernel
 {
 public:
@@ -42,7 +44,9 @@ public:
   float m_MBps;               // Number of MB per second for this kernel
 
   int m_kernelNum, m_deviceNum;                  // Kernel num and GPU device this kernel executed on
-  float m_queueTimeNS, m_kernelExecTimeMS, m_totalExecTimeMS; // Timers for timing this kernel
+  float m_queueTimeMS, m_kernelExecTimeMS, m_totalExecTimeMS; // Timers for timing this kernel
+
+  Time m_queueStarted, m_streamStarted, m_streamFinished; // CPU timers for this kernel stream
 
   cudaStream_t m_stream;  // Stream for asynchrnous execution - assumes only one GPU for this kernel
   cudaEvent_t m_startExecEvent, m_finishExecEvent; // Events for timing kernel execution
@@ -73,7 +77,6 @@ private:
   std::vector< MultiplyAdd* > m_data;   // Data for each run of MultiplyAdd
   int m_meanVectorSize, m_batchSize, m_threadsPerBlock;    // Run-time parameters for this kernel
 
-  float m_batchKernelExecTimeMS;  // Time from first kernel execution started to last kernel execution finished
   float m_batchTotalExecTimeMS;   // Time from first kernel data cudaMalloc to last kernel data downloaded
 
   float m_batchFloatingPointOps; // Total floating point ops for this batch

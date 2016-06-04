@@ -187,7 +187,7 @@ void MultiplyAdd::FinishHostExecution(bool freeHostMemory)
     correct = correct && (m_hC[n] == m_hCheckC[n]);
 
   if (Scheduler::m_verbose) printf("Kernel %d >> Device: %d, Queue: %.3fms, Kernel: %.3fms, Total: %.3fms, MFLOP/s: %.2f, MB/s: %.2f, Correct: %s\n", 
-        m_kernelNum, m_deviceNum, m_queueTimeNS, m_kernelExecTimeMS, m_totalExecTimeMS, m_MFLOPs, m_MBps, correct ? "True" : "False");
+        m_kernelNum, m_deviceNum, m_queueTimeMS, m_kernelExecTimeMS, m_totalExecTimeMS, m_MFLOPs, m_MBps, correct ? "True" : "False");
 
   // Free memory
   if (freeHostMemory)
@@ -222,49 +222,35 @@ void BatchMultiplyAdd::GenerateData()
 
 void BatchMultiplyAdd::ComputeBatchResults()
 {
+  // Find the earlest kernel stream start, and latest kernel stream finished
   // Sum up the per-kernel floating point ops and mem bytes accessed
+  Time firstStarted, lastFinished;
   m_batchFloatingPointOps = m_batchMemBytesReadWrite = 0;
   for (int kernel = 0; kernel < (int)m_data.size(); ++kernel)
   {
+    if (kernel == 0)
+    {
+      firstStarted = m_data[kernel]->m_streamStarted;
+      lastFinished = m_data[kernel]->m_streamFinished;
+    }
+    else
+    {
+      if (m_data[kernel]->m_streamStarted < firstStarted)
+        firstStarted = m_data[kernel]->m_streamStarted;
+      if (m_data[kernel]->m_streamFinished > lastFinished)
+        lastFinished = m_data[kernel]->m_streamFinished;
+    }
+
     m_batchFloatingPointOps += m_data[kernel]->m_floatingPointOps;
     m_batchMemBytesReadWrite += m_data[kernel]->m_memBytesReadWrite;
   }
 
-  // Use queue times to find which kernel was run first, and which last.
-  struct MultiplyAddComp
-  {
-    bool operator()(const MultiplyAdd *lhs, const MultiplyAdd *rhs)
-    {
-      return lhs->m_queueTimeNS < rhs->m_queueTimeNS;
-    }
-  };
-
-  std::sort(m_data.begin(), m_data.end(), MultiplyAddComp());
-
-  m_batchKernelExecTimeMS = m_batchTotalExecTimeMS = -1;
-  m_batchGFLOPs = m_batchGBps = -1;
-  if (m_data.size() < 2)
-    return;
-
-  const MultiplyAdd &firstKernel = **m_data.begin();
-  const MultiplyAdd &lastKernel = **m_data.rbegin();
-
-  // Most of the time this returns "invalid resource handle" as if these events were not created in this context..?
-  /*
-  // Check timers for debugging
-  ERROR_CHECK(cudaEventQuery(firstKernel.m_startExecEvent));
-  ERROR_CHECK(cudaEventQuery(lastKernel.m_finishExecEvent));
-  ERROR_CHECK(cudaEventQuery(firstKernel.m_startCudaMallocEvent));
-  ERROR_CHECK(cudaEventQuery(lastKernel.m_finishDownloadEvent));
-
-  // Record times
-  ERROR_CHECK(cudaEventElapsedTime(&m_batchKernelExecTimeMS, firstKernel.m_startExecEvent, lastKernel.m_finishExecEvent));
-  ERROR_CHECK(cudaEventElapsedTime(&m_batchTotalExecTimeMS, firstKernel.m_startCudaMallocEvent, lastKernel.m_finishDownloadEvent));
-  */
+  std::chrono::duration< double > diff(lastFinished - firstStarted);
+  m_batchTotalExecTimeMS = (float)(1000.0 * diff.count());
 
   // Compute GFLOP/s, GB/s for this batch
-  m_batchGFLOPs = m_batchFloatingPointOps / ((2 ^ 30) * (1000 * m_batchKernelExecTimeMS));
-  m_batchGBps = m_batchMemBytesReadWrite / ((2 ^ 30) * (1000 * m_batchKernelExecTimeMS));
+  m_batchGFLOPs = (float)(m_batchFloatingPointOps / ((1024.0*1024.0*1024.0) * (m_batchTotalExecTimeMS / 1000.0)));
+  m_batchGBps = (float)(m_batchMemBytesReadWrite / ((1024.0*1024.0*1024.0) * (m_batchTotalExecTimeMS / 1000.0)));
 }
 
 void BatchMultiplyAdd::OutputResultsCSV(const std::string &kernelName)
@@ -291,7 +277,7 @@ void BatchMultiplyAdd::OutputResultsCSV(const std::string &kernelName)
   {
     const MultiplyAdd &kernel = *m_data[kernelNum];
     csvKernelFile << m_batchSize << ", " << kernelName.c_str() << ", " << m_meanVectorSize << ", " << m_threadsPerBlock
-      << ", " << Scheduler::m_maxDevices << ", " << kernel.m_kernelNum << ", " << kernel.m_queueTimeNS 
+      << ", " << Scheduler::m_maxDevices << ", " << kernel.m_kernelNum << ", " << kernel.m_queueTimeMS 
       << ", " << kernel.m_kernelExecTimeMS << ", " << kernel.m_totalExecTimeMS << ", " << kernel.m_floatingPointOps 
       << ", " << kernel.m_memBytesReadWrite << ", " << kernel.m_MFLOPs << ", " << kernel.m_MBps << "\n";
   }
@@ -310,12 +296,12 @@ void BatchMultiplyAdd::OutputResultsCSV(const std::string &kernelName)
   posLast = csvBatchFile.tellp();
   if (posLast - posFirst == 0)
   {
-    csvBatchFile << "BatchSize, KernelName, MeanVectorSize, ThreadsPerBlock, MaxDevices, BatchKernelExecTimeMS"
-                << ", BatchTotalExecTimeMS, FloatingPtOps, MemBytes, GFLOPs, GBps\n";
+    csvBatchFile << "BatchSize, KernelName, MeanVectorSize, ThreadsPerBlock, MaxDevices, BatchTotalExecTimeMS"
+                << ", FloatingPtOps, MemBytes, GFLOPs, GBps\n";
   }
 
   csvBatchFile << m_batchSize << ", " << kernelName.c_str() << ", " << m_meanVectorSize << ", " << m_threadsPerBlock
-                << ", " << Scheduler::m_maxDevices << ", " << m_batchKernelExecTimeMS << ", " << m_batchTotalExecTimeMS
+                << ", " << Scheduler::m_maxDevices << ", " << m_batchTotalExecTimeMS
                 << ", " << m_batchFloatingPointOps << ", " << m_batchMemBytesReadWrite << ", " << m_batchGFLOPs 
                 << ", " << m_batchGBps << "\n";
 }
@@ -329,8 +315,7 @@ void RunKernelThreaded(BatchMultiplyAdd *batch, int kernelNum)
   int deviceNum = -1;
   bool firstAttempt = true;
 
-  typedef std::chrono::high_resolution_clock clock;
-  auto startQueue = clock::now();
+  kernel.m_queueStarted = std::chrono::high_resolution_clock::now();
 
   while (deviceNum < 0)
   {
@@ -349,10 +334,8 @@ void RunKernelThreaded(BatchMultiplyAdd *batch, int kernelNum)
     deviceNum = kernel.AcquireDeviceResources(&Scheduler::m_deviceInfo);
   }
 
-  // Get the time spent in the queue
-  auto finishQueue = clock::now();
-  std::chrono::duration< double > diff;
-  kernel.m_queueTimeNS = (float)(1000 * diff.count());
+  // Mark the start of this stream
+  kernel.m_streamStarted = std::chrono::high_resolution_clock::now();
 
   if (Scheduler::m_verbose) std::cout << "** Kernel " << kernelNum << " acquired GPU " << deviceNum << " **\n";
 
@@ -405,6 +388,9 @@ void RunKernelThreaded(BatchMultiplyAdd *batch, int kernelNum)
   // Need to make sure the data is finished being computed
   ERROR_CHECK(cudaEventSynchronize(kernel.m_finishDownloadEvent));
   //ERROR_CHECK(cudaStreamSynchronize(kernel.m_stream)); // This may not force the event to be completed, just recorded
+
+  // Mark the end of this stream
+  kernel.m_streamFinished = std::chrono::high_resolution_clock::now();
 
   // Release the resources (using a lock)
   kernel.ReleaseDeviceResources(&Scheduler::m_deviceInfo);

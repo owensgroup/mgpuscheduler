@@ -28,6 +28,9 @@ inline void gpuAssert(cudaError_t code, const char *file,
 
 void DeviceInfo::SetDeviceInfo(int deviceNum)
 {
+  // NOTE: This should really be using the driver api to get the amount of memory available, allocate a huge chunk,
+  //       and manage it internally (ideally), or keep querying cuMemGetInfo() and reserve some space for fragmentation.
+  //       For now, just reserve 2GB of free space and hope this is enough..
   cudaSetDevice(deviceNum);
   cudaDeviceProp deviceProp;
   ERROR_CHECK(cudaGetDeviceProperties(&deviceProp, deviceNum));
@@ -37,7 +40,7 @@ void DeviceInfo::SetDeviceInfo(int deviceNum)
   m_totalCores = _ConvertSMVer2Cores(deviceProp.major, deviceProp.minor) * deviceProp.multiProcessorCount;
   m_totalBlocksDimX = deviceProp.maxGridSize[0];
 
-  m_remainingGlobalMem = m_totalGlobalMem - 500*(1024*1024); // "Reserve" 100MB
+  m_remainingGlobalMem = (std::size_t)(m_totalGlobalMem - 2*(1024.0*1024.0*1024.0)); // "Reserve" 2 GB for other resources and fragmentation!...
   m_remainingTotalCores = m_totalCores;
   m_remainingBlocksDimX = m_totalBlocksDimX;
 }
