@@ -20,7 +20,7 @@ def main(argv):
    maxDevicesList = [1, 2]
    batchSizeList = [8, 16, 32, 64, 128, 256, 512]
    numRepeat = 1
-   verboseFlag = 1 # Use 1 to debug for now, then 0 to run
+   verboseFlag = 0 # Use 1 to debug for now, then 0 to run
    
    # "Usage: <ExecPath> inputSize batchSize maxDevices kernelName kernelArgument verboseOutput\n"
    # NOTE: Use timer only for output, not for actual timing (which is done in the program itself)
