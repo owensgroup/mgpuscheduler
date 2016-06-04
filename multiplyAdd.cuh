@@ -33,7 +33,7 @@ public:
   float *m_hA, *m_hB, *m_hC, *m_hCheckC;  // Host vectors
   float *m_dA, *m_dB, *m_dC;              // Device vectors
 
-  unsigned long long  m_globalMemRequired;  // The amount of global device memory required
+  std::size_t m_globalMemRequired;  // The amount of global device memory required
   int m_blocksRequired;                     // Blocks required, first-dimension only (for the 3-D blocks per grid)
 
   float m_floatingPointOps;   // Number of floating point operations used to execute this kernel

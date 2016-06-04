@@ -1,5 +1,6 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <cuda_profiler_api.h>
 #include <omp.h>
 #include <iostream>
 #include <thread>
@@ -38,9 +39,9 @@ __global__ void GPUMultiplyAdd(int n, float * A, float * B, float * C)
 
 void MultiplyAdd::FreeHostMemory()
 {
-  if (m_hA) free(m_hA);
-  if (m_hB) free(m_hB);
-  if (m_hC) free(m_hC);
+  if (m_hA) ERROR_CHECK(cudaFreeHost(m_hA));
+  if (m_hB) ERROR_CHECK(cudaFreeHost(m_hB));
+  if (m_hC) ERROR_CHECK(cudaFreeHost(m_hC));
   if (m_hCheckC) free(m_hCheckC);
   m_hA = m_hB = m_hC = m_hCheckC = NULL;
 }
@@ -62,9 +63,13 @@ void MultiplyAdd::InitializeData(int vectorSize, int threadsPerBlock, int kernel
   m_vectorSize = vectorSize;
   m_kernelNum = kernelNum;
 
-  m_hA = (float*)malloc(sizeof(float) * vectorSize);
-  m_hB = (float*)malloc(sizeof(float) * vectorSize);
-  m_hC = (float*)malloc(sizeof(float) * vectorSize);
+  //m_hA = (float*)malloc(sizeof(float) * vectorSize);
+  //m_hB = (float*)malloc(sizeof(float) * vectorSize);
+  //m_hC = (float*)malloc(sizeof(float) * vectorSize);
+
+  ERROR_CHECK(cudaHostAlloc(&m_hA, sizeof(float) * vectorSize, cudaHostAllocPortable));
+  ERROR_CHECK(cudaHostAlloc(&m_hB, sizeof(float) * vectorSize, cudaHostAllocPortable));
+  ERROR_CHECK(cudaHostAlloc(&m_hC, sizeof(float) * vectorSize, cudaHostAllocPortable));
   m_hCheckC = (float*)malloc(sizeof(float) * vectorSize);
 
   m_blocksRequired = vectorSize % threadsPerBlock == 0 ? (vectorSize / threadsPerBlock) : 1 + (vectorSize / threadsPerBlock);
@@ -93,36 +98,44 @@ int MultiplyAdd::AcquireDeviceResources(std::vector< DeviceInfo > *deviceInfo)
   // Lock this method
   std::lock_guard< std::mutex > guard(Scheduler::m_deviceInfoMutex); // Automatically unlocks when destroyed
 
-  int deviceNum, freeDeviceNum = -1;
-  for (deviceNum = 0; deviceNum < (int)deviceInfo->size(); ++deviceNum)
+  int maxMemoryAvailableDevice = -1;
+  std::size_t maxMemoryAvailable;
+
+  // Choose the device with the most amount of memory available
+  for (int deviceNum = 0; deviceNum < (int)deviceInfo->size(); ++deviceNum)
   {
     DeviceInfo &device = deviceInfo->operator[](deviceNum);
     if (m_globalMemRequired < device.m_remainingGlobalMem && m_blocksRequired < device.m_remainingBlocksDimX)
     {
-      if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << " acquired GPU " << deviceNum << " **\n";
-      if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ":  Prev Memory: " << device.m_remainingGlobalMem / (1024.0*1024.0) << "MB, Blocks: " << device.m_remainingBlocksDimX << "\n";
-
-      freeDeviceNum = deviceNum;
-      device.m_remainingGlobalMem -= m_globalMemRequired;
-      device.m_remainingBlocksDimX -= m_blocksRequired;
-
-      if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ": - Used Memory: " << m_globalMemRequired / (1024.0*1024.0) << "MB, Blocks: " << m_blocksRequired << "\n";
-      if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ": =  New Memory: " << device.m_remainingGlobalMem / (1024.0*1024.0) << "MB, Blocks: " << device.m_remainingBlocksDimX << "\n";
-      if (Scheduler::m_verbose) std::flush(std::cout);
-
-      break;
-    }
-    else
-    {
-      if (Scheduler::m_verbose) std::cout << "\n**********************************************************************\n";
-      if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << " >> Unable to be acquired by device " << deviceNum << "\n";
-      if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ": Kernel Memory: " << m_globalMemRequired / (1024.0*1024.0) << "MB, Blocks: " << m_blocksRequired << "\n";
-      if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ": Device Memory: " << device.m_remainingGlobalMem / (1024.0*1024.0) << "MB, Blocks: " << device.m_remainingBlocksDimX << "\n";
-      if (Scheduler::m_verbose) std::cout << "**********************************************************************\n";
+      if (maxMemoryAvailableDevice == -1)
+      {
+        maxMemoryAvailableDevice = deviceNum;
+        maxMemoryAvailable = device.m_remainingGlobalMem;
+      }
+      else if (device.m_remainingGlobalMem > maxMemoryAvailable)
+      {
+        maxMemoryAvailableDevice = deviceNum;
+        maxMemoryAvailable = device.m_remainingGlobalMem;
+      }
     }
   }
 
-  return freeDeviceNum;
+  if (maxMemoryAvailableDevice != -1)
+  {
+    DeviceInfo &device = deviceInfo->operator[](maxMemoryAvailableDevice);
+
+    if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << " acquired GPU " << maxMemoryAvailableDevice << " **\n";
+    if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ":  Prev Memory: " << device.m_remainingGlobalMem / (1024.0*1024.0) << "MB, Blocks: " << device.m_remainingBlocksDimX << "\n";
+
+    device.m_remainingGlobalMem -= m_globalMemRequired;
+    device.m_remainingBlocksDimX -= m_blocksRequired;
+
+    if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ": - Used Memory: " << m_globalMemRequired / (1024.0*1024.0) << "MB, Blocks: " << m_blocksRequired << "\n";
+    if (Scheduler::m_verbose) std::cout << "** Kernel " << m_kernelNum << ": =  New Memory: " << device.m_remainingGlobalMem / (1024.0*1024.0) << "MB, Blocks: " << device.m_remainingBlocksDimX << "\n";
+    if (Scheduler::m_verbose) std::flush(std::cout);
+  }
+
+  return maxMemoryAvailableDevice;
 }
 
 /**
@@ -154,6 +167,12 @@ void MultiplyAdd::ReleaseDeviceResources(std::vector< DeviceInfo > *deviceInfo)
 */
 void MultiplyAdd::FinishHostExecution(bool freeHostMemory)
 {
+  // Check timers for debugging
+  ERROR_CHECK(cudaEventQuery(m_startExecEvent));
+  ERROR_CHECK(cudaEventQuery(m_finishExecEvent));
+  ERROR_CHECK(cudaEventQuery(m_startCudaMallocEvent));
+  ERROR_CHECK(cudaEventQuery(m_finishDownloadEvent));
+
   // Update timers
   ERROR_CHECK(cudaEventElapsedTime(&m_kernelExecTimeMS, m_startExecEvent, m_finishExecEvent));
   ERROR_CHECK(cudaEventElapsedTime(&m_totalExecTimeMS, m_startCudaMallocEvent, m_finishDownloadEvent));
@@ -229,8 +248,19 @@ void BatchMultiplyAdd::ComputeBatchResults()
 
   const MultiplyAdd &firstKernel = **m_data.begin();
   const MultiplyAdd &lastKernel = **m_data.rbegin();
+
+  // Most of the time this returns "invalid resource handle" as if these events were not created in this context..?
+  /*
+  // Check timers for debugging
+  ERROR_CHECK(cudaEventQuery(firstKernel.m_startExecEvent));
+  ERROR_CHECK(cudaEventQuery(lastKernel.m_finishExecEvent));
+  ERROR_CHECK(cudaEventQuery(firstKernel.m_startCudaMallocEvent));
+  ERROR_CHECK(cudaEventQuery(lastKernel.m_finishDownloadEvent));
+
+  // Record times
   ERROR_CHECK(cudaEventElapsedTime(&m_batchKernelExecTimeMS, firstKernel.m_startExecEvent, lastKernel.m_finishExecEvent));
   ERROR_CHECK(cudaEventElapsedTime(&m_batchTotalExecTimeMS, firstKernel.m_startCudaMallocEvent, lastKernel.m_finishDownloadEvent));
+  */
 
   // Compute GFLOP/s, GB/s for this batch
   m_batchGFLOPs = m_batchFloatingPointOps / ((2 ^ 30) * (1000 * m_batchKernelExecTimeMS));
@@ -309,6 +339,11 @@ void RunKernelThreaded(BatchMultiplyAdd *batch, int kernelNum)
       if (Scheduler::m_verbose) std::cout << "** Kernel " << kernelNum << " queued for next available GPU **\n";
       firstAttempt = false;
     }
+    else
+    {
+      // Sleep to let others have a better chance for resources - maybe not necessary
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
 
     // Try to acquire GPU resources (using a lock)
     deviceNum = kernel.AcquireDeviceResources(&Scheduler::m_deviceInfo);
@@ -367,8 +402,9 @@ void RunKernelThreaded(BatchMultiplyAdd *batch, int kernelNum)
   // Mark the end of total execution event
   ERROR_CHECK(cudaEventRecord(kernel.m_finishDownloadEvent, kernel.m_stream));
 
-  // Need to synchronize before releasing resources
-  ERROR_CHECK(cudaStreamSynchronize(kernel.m_stream));
+  // Need to make sure the data is finished being computed
+  ERROR_CHECK(cudaEventSynchronize(kernel.m_finishDownloadEvent));
+  //ERROR_CHECK(cudaStreamSynchronize(kernel.m_stream)); // This may not force the event to be completed, just recorded
 
   // Release the resources (using a lock)
   kernel.ReleaseDeviceResources(&Scheduler::m_deviceInfo);
@@ -405,6 +441,9 @@ void BatchMultiplyAdd::RunExperiment(const std::string &kernelName, int numRepea
 
     // Compute accumulated batch results
     ComputeBatchResults();
+
+    // Stop the profiler, no more CUDA calls
+    ERROR_CHECK(cudaProfilerStop());
 
     // Record results to CSV
     OutputResultsCSV(kernelName);

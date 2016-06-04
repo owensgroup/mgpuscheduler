@@ -11,7 +11,8 @@ class MatrixMultiply : public ScheduledKernel
 {
 public:
   MatrixMultiply()
-    : m_hA(NULL), m_hB(NULL), m_hC(NULL), m_hCheckC(NULL), m_dA(NULL), m_dB(NULL), m_dC(NULL)
+    : m_hA(NULL), m_hB(NULL), m_hC(NULL), m_hCheckC(NULL), m_dA(NULL), m_dB(NULL), m_dC(NULL),
+    m_memBytesReadWrite(0), m_floatingPointOps(0)
   {}
 
   ~MatrixMultiply()
@@ -35,7 +36,7 @@ public:
   float *m_hA, *m_hB, *m_hC, *m_hCheckC;  // Host vectors (1d pointers)
   float *m_dA, *m_dB, *m_dC;              // Device vectors
 
-  unsigned long long  m_globalMemRequired;  // The amount of global device memory required
+  std::size_t  m_globalMemRequired;  // The amount of global device memory required
   int m_blocksRequired;                     // Blocks required, first-dimension only (for the 3-D blocks per grid)
 
   float m_floatingPointOps;   // Number of floating point operations used to execute this kernel
