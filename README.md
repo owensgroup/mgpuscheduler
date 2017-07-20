@@ -1,11 +1,12 @@
-#Multi-GPU Scheduler
+
+# Multi-GPU Scheduler
 Gets information on CUDA capable devices available on a workstation/server,
 and finds the optimal distribution of a workload. Schedule should dynamically
 work for both single and multi-gpu architecture.
 
 **Important Note:** This scheduler does not ensure that the given kernel is optimized for best possible performance, it assumes that optimization techniques like loop unrolling or use of shared memory is in fact already implemented in the kernel.
 
-##Compile
+## Compile
 If you add more files, make sure to create the appropriate `CUDA_ADD_EXECUTABLE`
 for them. Name set for `CUDA_ADD_EXECUTABLE` will be the name of binary executable
 file.
@@ -16,12 +17,12 @@ cmake .. && make -j8
 ```
 * Usage: `./sched meanVectorSize batchSize maxDevices threadsPerBlock maxGPUsPerKernel verboseOutput`
 
-##Default Applications
+## Default Applications
 We have provided two simple working CUDA applications to show how the scheduler handles workload.
 * **Fused Multiply-Add:** As the name suggest, it is a very simple kernel that adds two randomly generated floats and multiplies them with another constant float.
 * **Matrix Multiplication:** A slightly more complicated application is Matrix Multiplication on GPU, which uses shared memory resources as well as optimization techniques like block-access (maximizing memory bandwidth) and loop unrolling (maximizing arithmetic throughput). It also has a basic `MemSetKernel` to initialize working arrays in parallel.
 
-##Adding your own Application to MGPUScheduler
+## Adding your own Application to MGPUScheduler
 Default applications mentioned above can be very easily modified to write your own application for the scheduler. The hierarchical structure of this project is as follows;
 
 > **Main** - main.cpp used as the `int main(int argc, char** argv)` call to get the input arguments, which are easily changeable if your application requires more complicated I/O system. Scheduler is initialized with three simple commands, which gets all the necessary parameters of the system:
@@ -55,10 +56,10 @@ batchMtxMulti.RunExperiment(std::string("MatrixMultiply"));
 
 
 
-##How to contribute?
-- `fork` using GitHub; https://github.com/neoblizz/mgpuscheduler
+## How to contribute?
+- `fork` using GitHub; https://github.com/owensgroup/mgpuscheduler
 - Using command line `cd` into a directory you'd like to work on.
-- `git clone https://github.com/neoblizz/mgpuscheduler.git`
+- `git clone https://github.com/owensgroup/mgpuscheduler.git`
 - `git remote set-url -push origin https://github.com/username/mgpuscheduler.git` This sets the url of the push command to your `username` repository that you forked. That way we can create pull request and make sure nothing accidentally breaks in the main repo. Be sure to change the `username` to your username in the command.
 - Make changes to the file you'd like.
 - `git add filename`
